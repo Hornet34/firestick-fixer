@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Home on Fire</string>
+    <string name="service_label">Home on Fire Service</string>
+    <string name="repo_url">https://github.com/toolicious/home-on-fire</string>
+
+    <!--
+        Shown by Android in Settings → Accessibility next to the toggle
+        for our service. Should explain in one sentence what the service
+        does and why it needs the binding.
+    -->
+    <string name="accessibility_description">
+        Redirects the Fire TV Home button to a launcher of your choice,
+        and offers an optional long-press of the Menu key as a shortcut
+        back into Home on Fire.
+    </string>
+
+    <!-- Target row -->
+    <string name="target_picker_tip">Choose which app to launch in place of the Fire TV home. Long-press opens the selected app\'s system info page.</string>
+    <string name="target_none">Choose target app…</string>
+    <string name="target_not_installed_suffix"> - not installed</string>
+    <string name="target_picker_emoji">📂</string>
+    <string name="target_picker_emoji_desc">Choose target app</string>
+    <string name="launch_button_glyph">▶</string>
+    <string name="launch_button_desc">Launch target app</string>
+    <string name="launch_button_tip">Launch the target app now.</string>
+
+    <!-- Switches -->
+    <string name="switch_accessibility">Accessibility service (required)</string>
+    <string name="switch_accessibility_tip">Required for everything else in this app to work. This permission has to be granted only once via adb:\nadb shell pm grant io.github.toolicious.homeonfire android.permission.WRITE_SECURE_SETTINGS\nFrom a phone shell app there is no adb: run just the pm grant part, without the adb shell prefix.</string>
+    <string name="switch_hijack">Replace ⌂ Home button</string>
+    <string name="switch_hijack_tip">Pressing ⌂ Home from any third-party app opens the target app instead of the Amazon home screen.\nDouble-press ⌂ Home about a second apart, or long-press it, in the target app to escape to the Amazon home screen if needed.\nPress ↩ Back or ◉ OK while the Home icon on the Amazon home screen is focused to open the target app.</string>
+    <string name="switch_hijack_tip_fos7">Pressing ⌂ Home from any third-party app opens the target app instead of the Amazon home screen.\nOn Fire OS 7 the system holds a Home press for up to 5 seconds; a loading animation covers the wait. A mapped launcher button that sends its own key code opens instantly instead.\nDouble-press ⌂ Home about a second apart, or long-press it, in the target app to escape to the Amazon home screen if needed.\nPress ↩ Back or ◉ OK while the Home icon on the Amazon home screen is focused to open the target app.</string>
+    <!-- Fire OS 7 only: what covers Amazon home during the ~5 s Home delay
+         (shown on the right of the Replace Home row). -->
+    <string name="mask_cover_label">Loading screen:</string>
+    <string name="mask_cover_animation">Animation</string>
+    <string name="mask_cover_black">Black screen</string>
+    <string name="mask_cover_tip">On Fire OS 7 the system holds a ⌂ Home press for up to 5 seconds. This chooses what covers Amazon home during the wait. Animation plays a short loading scene. Black screen shows a plain black screen with a loading message. Fire OS 8 has no delay, so nothing is shown. Hold ◉ OK to preview the current choice.</string>
+
+    <!-- Escape gestures, shown as a sub-row under Replace Home. Both default to on. -->
+    <string name="escape_label">Escape to Amazon home:</string>
+    <string name="escape_long_label">Long-press</string>
+    <string name="escape_double_label">Double-press</string>
+    <string name="escape_long_box_tip">Hold ⌂ Home to switch between your launcher and the Amazon home screen. Turn this off if you would rather see the panel that a long press opens, with its profile, sleep and mirroring tiles. Some remotes have a settings button that opens the very same panel, and Home on Fire cannot tell the two apart, so turning this off also stops that button from switching launchers. Press ◉ OK to switch it on or off.</string>
+    <string name="escape_double_box_tip">Press ⌂ Home twice, about a second apart, to stay on the Amazon home screen instead of being sent back to your launcher. Turn this off if you often press ⌂ Home repeatedly and end up on Amazon home by accident. Press ◉ OK to switch it on or off.</string>
+
+    <string name="switch_boot">Launch on boot</string>
+    <string name="switch_boot_tip">Open the target app automatically when the device boots or wakes from standby.</string>
+    <string name="switch_menu_lp">☰ Menu long-press opens this config screen</string>
+    <string name="switch_menu_lp_tip">Hold the ☰ Menu button for half a second to open this config screen.</string>
+    <!-- Instant launcher shortcuts: reach the target without going through the
+         Home button, so on Fire OS 7 they skip the app-switch delay. -->
+    <string name="launch_key_label">Map custom buttons</string>
+    <string name="launch_key_launcher_label">Launcher:</string>
+    <string name="launch_key_amazon_label">Amazon home:</string>
+    <string name="launch_key_tip">Map spare remote buttons: one for your target launcher, one for the Amazon home screen, Custom for any number of further apps. Buttons with their own key code (● ● ● ●, numbers, channel, subtitles, teletext, ⏪ ⏵ ⏩) switch instantly. Buttons that open an app (⊞ Apps, 📺 Live TV, Netflix) can only be redirected, which is slightly slower and may flash briefly.</string>
+    <string name="launch_key_tip_fos7">Map spare remote buttons: one for your target launcher, one for the Amazon home screen, Custom for any number of further apps. Buttons with their own key code (● ● ● ●, numbers, channel, subtitles, teletext, ⏪ ⏵ ⏩) switch instantly, unlike ⌂ Home which Fire OS 7 holds for up to 5 seconds. Buttons that open an app (⊞ Apps, 📺 Live TV, Netflix) can only be redirected, which is slightly slower and may flash briefly.</string>
+    <string name="launch_key_launcher_box_tip">Press ◉ OK to bind a remote button that opens your target launcher directly (↩ Back cancels); hold ◉ OK to reset.</string>
+    <string name="launch_key_amazon_box_tip">Press ◉ OK to bind a remote button that jumps to the Amazon home screen (↩ Back cancels); hold ◉ OK to reset.</string>
+    <string name="launch_key_none">None</string>
+    <string name="launch_key_learning">Press a button…</string>
+    <string name="launch_key_cleared">Button mapping reset</string>
+    <!-- Plain slot names, used when a binding collides with one that already exists. -->
+    <string name="launch_key_launcher_name">Launcher</string>
+    <string name="launch_key_amazon_name">Amazon home</string>
+    <string name="map_button_in_use">That button is already mapped to %1$s.</string>
+    <string name="map_button_is_same_app">That button already opens this app.</string>
+
+    <!-- Custom mappings: any button opens any installed app, edited in their own dialog. -->
+    <string name="launch_key_custom_label">Custom:</string>
+    <string name="launch_key_custom_box_tip">Opens a dialog where further buttons can be mapped, each one to an app of your choice.</string>
+    <string name="custom_maps_add">+</string>
+    <!-- Appended to the icons in the Custom box when more mappings exist than fit. -->
+    <string name="custom_maps_more">…</string>
+    <string name="custom_maps_title">Custom button mappings</string>
+    <string name="custom_maps_pick_title">Open which app?</string>
+    <string name="custom_maps_pick_app">Choose an app…</string>
+    <string name="custom_maps_row_cleared">App cleared</string>
+    <string name="custom_maps_hint">Press ◉ OK on a field to set it, hold ◉ OK to clear it. Choose the app first, then the button that should open it. A row without a button is kept but does nothing; a row without an app disappears when you close this dialog with ↩ Back.</string>
+
+    <!-- Beta universal redirect: learn branded buttons (Apps, Live TV, ...) that send no keycode. -->
+    <string name="redirect_learn_added">Mapped %1$s</string>
+    <string name="redirect_learn_warn_title">This button opens a content app</string>
+    <string name="redirect_learn_warn_msg">%1$s is an app you watch, not a shell screen. Mapping its button makes %1$s unreachable everywhere, even from its own tile. Map it anyway?</string>
+    <string name="redirect_learn_warn_add">Map anyway</string>
+    <string name="redirect_learn_warn_cancel">Cancel</string>
+    <string name="map_button_opens_store">That button opens an Amazon Appstore page, not an app, so there is nothing to map. If the app is not installed, install it first and try again.</string>
+    <string name="map_button_opens_home">That button opened the Amazon home screen, not an app, so there\'s nothing to map. Make sure the app this button should open is installed and set up so it opens when you press the button. Only then can the button be redirected.</string>
+
+    <!-- Friendly names for bound launch keys, shown on the custom-launch-key row. -->
+    <string name="key_red">Red</string>
+    <string name="key_green">Green</string>
+    <string name="key_yellow">Yellow</string>
+    <string name="key_blue">Blue</string>
+    <string name="key_channel_up">Channel +</string>
+    <string name="key_channel_down">Channel -</string>
+    <string name="key_subtitles">Subtitles</string>
+    <string name="key_teletext">Teletext</string>
+    <string name="key_live_tv">Live TV</string>
+    <string name="key_play">Play</string>
+    <string name="key_rewind">Rewind</string>
+    <string name="key_forward">Fast-forward</string>
+    <string name="key_number">Number %1$d</string>
+
+    <string name="switch_verbose">Verbose logging (for debugging)</string>
+    <string name="switch_verbose_tip">Logs every key and window event the accessibility service receives, tagged HomeOnFire. View on-device with the button on the right, or with:\nadb logcat -s HomeOnFire</string>
+
+    <!-- Log viewer: round button in the verbose row + the full-screen view it opens. -->
+    <string name="log_button_desc">Show diagnostic log</string>
+    <string name="log_button_tip">Open a full-screen diagnostic view (Fire OS, accessibility status, target, recent log) you can photograph and share, no adb needed.</string>
+    <string name="log_viewer_title">Diagnostic log</string>
+
+    <!-- Info-dialog "open device settings" link. -->
+    <string name="info_dialog_device_info_link">Fire OS device info</string>
+
+    <!-- Loader animation, reachable as an easter egg via the info-dialog logo. -->
+    <string name="loader_caption_loading">Loading custom launcher…</string>
+    <!-- Shown instead when the loading screen covers an app a mapped button opened. -->
+    <string name="loader_caption_loading_app">Loading app…</string>
+    <string name="loader_caption_ready">Ready</string>
+
+    <!-- Header info button -->
+    <string name="info_button_glyph">ⓘ</string>
+    <string name="info_button_desc">About Home on Fire</string>
+    <string name="info_button_tip">App name, version, project link and Fire OS device info.</string>
+
+    <!-- Info dialog -->
+    <string name="info_dialog_version">Version %1$s</string>
+    <string name="info_dialog_version_unknown">?</string>
+    <string name="info_dialog_description">Redirects the Fire TV ⌂ Home button to a launcher of your choice.</string>
+    <string name="info_dialog_ok">OK</string>
+
+    <!-- Toasts -->
+    <string name="toast_grant_via_adb">Run once via adb:\nadb shell pm grant io.github.toolicious.homeonfire android.permission.WRITE_SECURE_SETTINGS</string>
+    <string name="toast_no_browser">No browser installed.</string>
+    <string name="toast_settings_unavailable">Settings not available.</string>
+    <string name="toast_no_target">No target app set.</string>
+    <string name="toast_target_missing">Target app not installed: %1$s</string>
+    <string name="toast_no_launchable_apps">No launchable apps found to set as target.</string>
+
+    <!-- Picker -->
+    <string name="picker_title">Choose target app</string>
+
+    <!-- Beta: overlay-timing tuning rows (shown on all versions for layout
+         checking; the overlay itself only runs on Fire OS 7). -->
+    <string name="tuning_heading">Beta: overlay timing (Fire OS 7)</string>
+    <string name="tuning_grace">Start cover delay</string>
+    <string name="tuning_grace_tip">How soon the loading overlay covers the screen after you press ⌂ Home. Lower hides the Amazon home flash sooner. Press ◀ ▶ to change. Takes effect on Fire OS 7.</string>
+    <string name="tuning_hold">End hold</string>
+    <string name="tuning_hold_tip">How long the overlay stays solid after the launcher window appears, before it fades. Higher gives the launcher time to draw, hiding the flash at the end. Press ◀ ▶ to change. Takes effect on Fire OS 7.</string>
+    <string name="tuning_fade">Fade</string>
+    <string name="tuning_fade_tip">Cross-fade duration when the overlay lifts. Press ◀ ▶ to change. Takes effect on Fire OS 7.</string>
+    <string name="tuning_reset">Reset timing to defaults</string>
+    <!-- Filled from Prefs.DEFAULT_MASK_GRACE / HOLD / FADE so it can never drift from the code. -->
+    <string name="tuning_reset_tip">Restore start delay %1$d ms, end hold %2$d ms, fade %3$d ms.</string>
+    <string name="tuning_reset_done">Timing reset to defaults</string>
+</resources>
