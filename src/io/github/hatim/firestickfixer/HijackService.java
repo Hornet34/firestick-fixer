@@ -763,21 +763,23 @@ public class HijackService extends AccessibilityService {
     private void typeSearchInto(final String app, final String query) {
         Intent launch = launchIntentFor(app);
         if (launch == null || mainHandler == null) return;
-        // Covered for the whole attempt, so the user does not watch screens change; the
-        // cover is keyed to no app, so the app's own window events do not lift it early.
-        showButtonCover(TYPING_COVER, TYPE_SEARCH_MAX_MS + 1_000L);
+        // The waiting panel (see showWorking) stays up for the whole attempt, so the user
+        // sees what is happening instead of screens changing underneath.
         try {
             startActivity(launch); // an existing task just comes back to the front
         } catch (Exception e) {
-            hideButtonCover();
+            hideVoicePanel();
             return;
         }
         RingLog.i(TAG, "Voice search: typing into " + app);
         sideMenuNext = 0;
+        lastClickedMenuIndex = -1;
+        learnedRoute = prefs.getVoiceRoute(app);
         final int token = ++typeSearchToken;
         final long start = System.currentTimeMillis();
         final long[] lastMenuClick = {0L};
         final boolean[] clickedLabel = {false};
+        final int[] lastSig = {-1};
         Runnable poll = new Runnable() {
             @Override public void run() {
                 if (token != typeSearchToken) return;
@@ -787,15 +789,22 @@ public class HijackService extends AccessibilityService {
                 // Settle first: an app brought back to the front can take seconds to
                 // rebuild its screen (Nuvio's search box: up to ~4 s). Only after that,
                 // and after each menu click, is "no search box" an answer.
-                boolean mayAct = sinceStart >= TYPE_SETTLE_MS
+                // Settled = the screen looked the same at two polls in a row, or the cap.
+                int sig = screenSignature(app);
+                boolean settled = (sig > 0 && sig == lastSig[0] && sinceStart >= TYPE_SETTLE_MIN_MS)
+                        || sinceStart >= TYPE_SETTLE_MS;
+                lastSig[0] = sig;
+                boolean mayAct = settled
                         && (lastMenuClick[0] == 0L || sinceMenu >= TYPE_ITEM_WAIT_MS);
                 int r = trySearchByTyping(app, query, mayAct && !clickedLabel[0], mayAct);
                 if (r == TYPE_DONE) {
                     typeSearchToken++;
                     RingLog.i(TAG, "Voice search typed into " + app + " after " + sinceStart + "ms");
-                    // Let the results start drawing before the cover lifts.
+                    // The menu item that led here is this app's route to its search.
+                    if (lastClickedMenuIndex >= 0) prefs.setVoiceRoute(app, lastClickedMenuIndex);
+                    // Let the results start drawing before the panel lifts.
                     mainHandler.postDelayed(new Runnable() {
-                        @Override public void run() { hideButtonCover(); }
+                        @Override public void run() { hideVoicePanel(); }
                     }, 600L);
                     return;
                 }
@@ -806,7 +815,7 @@ public class HijackService extends AccessibilityService {
                     lastMenuClick[0] = now;
                 } else if (r == TYPE_GAVE_UP || sinceStart > TYPE_SEARCH_MAX_MS) {
                     typeSearchToken++;
-                    hideButtonCover();
+                    hideVoicePanel();
                     RingLog.i(TAG, "Voice search: no search box found in " + app);
                     android.widget.Toast.makeText(HijackService.this,
                             getString(R.string.voice_no_search_box, appName(app)),
@@ -819,8 +828,9 @@ public class HijackService extends AccessibilityService {
         mainHandler.postDelayed(poll, TYPE_POLL_MS);
     }
 
-    private static final String TYPING_COVER = "(typing)";
     private static final long TYPE_POLL_MS = 300L;
+    /** Earliest a screen counts as settled, and the latest we wait for it to settle. */
+    private static final long TYPE_SETTLE_MIN_MS = 900L;
     private static final long TYPE_SETTLE_MS = 3_500L;
     private static final long TYPE_ITEM_WAIT_MS = 2_500L;
     private static final long TYPE_SEARCH_MAX_MS = 16_000L;
@@ -931,8 +941,41 @@ public class HijackService extends AccessibilityService {
         return false;
     }
 
-    /** Index of the next side-menu item to try in the current voice search. */
+    /** Position in the try-order of side-menu items for the current voice search. */
     private int sideMenuNext = 0;
+    /** Menu item clicked last, and the one that reached search last time (-1: none). */
+    private int lastClickedMenuIndex = -1;
+    private int learnedRoute = -1;
+
+    /** Cheap fingerprint of the app's screen: node count, or 0 if the app is not in front. */
+    private int screenSignature(String app) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return 0;
+        try {
+            CharSequence pkg = root.getPackageName();
+            if (pkg == null || !app.equals(pkg.toString())) return 0;
+            return countNodes(root, 0);
+        } catch (Exception e) {
+            return 0;
+        } finally {
+            root.recycle();
+        }
+    }
+
+    private static int countNodes(AccessibilityNodeInfo node, int depth) {
+        if (node == null || depth > 30) return 0;
+        int n = 1;
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo c = node.getChild(i);
+            if (c == null) continue;
+            try {
+                n += countNodes(c, depth + 1);
+            } finally {
+                c.recycle();
+            }
+        }
+        return n;
+    }
 
     /**
      * Clicks the next item of the app's left-edge side menu (items sorted top to bottom).
@@ -952,11 +995,18 @@ public class HijackService extends AccessibilityService {
                 return ra.top - rb.top;
             }
         });
+        // The item that led to search last time goes first, then the rest top to bottom.
+        java.util.List<Integer> order = new java.util.ArrayList<Integer>();
+        if (learnedRoute >= 0 && learnedRoute < items.size()) order.add(learnedRoute);
+        for (int i = 0; i < items.size(); i++) if (i != learnedRoute) order.add(i);
         boolean clicked = false;
-        if (sideMenuNext < items.size()) {
-            clicked = items.get(sideMenuNext).performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            RingLog.i(TAG, "Voice search: side menu item " + (sideMenuNext + 1) + " of "
-                    + items.size() + " clicked=" + clicked);
+        if (sideMenuNext < order.size()) {
+            int index = order.get(sideMenuNext);
+            clicked = items.get(index).performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            lastClickedMenuIndex = index;
+            RingLog.i(TAG, "Voice search: side menu item " + (index + 1) + " of "
+                    + items.size() + (index == learnedRoute ? " (learned)" : "")
+                    + " clicked=" + clicked);
             sideMenuNext++;
         }
         for (AccessibilityNodeInfo n : items) n.recycle();
@@ -1155,10 +1205,13 @@ public class HijackService extends AccessibilityService {
     }
 
     /** How long the decision panel waits before searching in the app. */
-    private static final long VOICE_CHOICE_MS = 2_000L;
+    private static final long VOICE_CHOICE_MS = 1_500L;
     private android.view.View voicePanel;
     private android.widget.TextView voicePanelQuery;
     private android.widget.ProgressBar voicePanelBar;
+    private android.widget.TextView voicePanelTitle, voicePanelHint;
+    /** The panel now shows "opening search" while the typing fallback works. */
+    private volatile boolean voiceWorking = false;
     /** True while the panel is up and the user can still choose; keys go to it. */
     private volatile boolean voiceChoicePending = false;
     private Runnable voiceGo;
@@ -1184,6 +1237,7 @@ public class HijackService extends AccessibilityService {
         col.addView(icon, new android.widget.LinearLayout.LayoutParams((int) (96 * d), (int) (96 * d)));
         android.widget.TextView title = new android.widget.TextView(this);
         title.setText(getString(R.string.voice_panel_title, appName(app)));
+        voicePanelTitle = title;
         title.setTextColor(0xFFFFFFFF);
         title.setTextSize(26);
         title.setGravity(Gravity.CENTER);
@@ -1206,6 +1260,7 @@ public class HijackService extends AccessibilityService {
         col.addView(voicePanelBar, barLp);
         android.widget.TextView hint = new android.widget.TextView(this);
         hint.setText(R.string.voice_panel_hint);
+        voicePanelHint = hint;
         hint.setTextColor(0xFF94A3B8);
         hint.setTextSize(18);
         hint.setGravity(Gravity.CENTER);
@@ -1244,9 +1299,8 @@ public class HijackService extends AccessibilityService {
         if (voiceGo != null && mainHandler != null) mainHandler.removeCallbacks(voiceGo);
         voiceGo = null;
         if (inApp && voiceApp != null && voiceQuery != null) {
-            // The black cover takes over from the panel until the app has painted.
-            showButtonCover(voiceApp);
-            hideVoicePanel();
+            // The panel stays up and turns into a waiting screen while the app opens.
+            showWorking(voiceApp);
             // Close Alexa's results page first (Back on it returns to the app it opened
             // over), so Back from the app later never lands on Alexa's page again.
             selfBackUntil = System.currentTimeMillis() + 600L;
@@ -1266,8 +1320,20 @@ public class HijackService extends AccessibilityService {
         voiceQuery = null;
     }
 
+    /** Turns the decision panel into an "opening search" waiting screen. */
+    private void showWorking(String app) {
+        voiceWorking = true;
+        if (voicePanel == null) return;
+        if (voicePanelTitle != null) {
+            voicePanelTitle.setText(getString(R.string.voice_panel_working, appName(app)));
+        }
+        if (voicePanelHint != null) voicePanelHint.setText(R.string.voice_panel_working_hint);
+        if (voicePanelBar != null) voicePanelBar.setIndeterminate(true);
+    }
+
     private void hideVoicePanel() {
         voiceChoicePending = false;
+        voiceWorking = false;
         if (voicePanel != null) {
             try {
                 if (windowManager != null) windowManager.removeView(voicePanel);
@@ -1284,6 +1350,16 @@ public class HijackService extends AccessibilityService {
      * Returns true when the key was taken.
      */
     private boolean handleVoicePanelKey(KeyEvent event) {
+        if (voiceWorking && voicePanel != null) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0
+                    && event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+                typeSearchToken++; // stop the search attempt
+                hideVoicePanel();
+                RingLog.i(TAG, "Voice search: cancelled while opening the app's search");
+            }
+            consumedDownKey = event.getKeyCode();
+            return true;
+        }
         if (!voiceChoicePending) return false;
         if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
             int k = event.getKeyCode();
@@ -1302,10 +1378,12 @@ public class HijackService extends AccessibilityService {
     private void runVoiceHandoff(String app, String query) {
         Intent search = searchIntentFor(app, query);
         if (search == null) {
-            typeSearchInto(app, query);
+            typeSearchInto(app, query); // the waiting panel stays up meanwhile
             return;
         }
+        // A link opens in well under a second: a plain cover until the app paints.
         showButtonCover(app);
+        hideVoicePanel();
         try {
             startActivity(search);
             RingLog.i(TAG, "Voice search sent to " + app);

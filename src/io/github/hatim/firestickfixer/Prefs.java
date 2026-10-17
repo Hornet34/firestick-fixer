@@ -228,6 +228,17 @@ public class Prefs {
         sp.edit().putBoolean(KEY_BACK_HOLD, enabled).apply();
     }
 
+    private static final String KEY_VOICE_ROUTE = "voice_route:";
+
+    /** Side-menu item (0-based) that reached an app's search last time, or -1. */
+    public int getVoiceRoute(String pkg) {
+        return sp.getInt(KEY_VOICE_ROUTE + pkg, -1);
+    }
+
+    public void setVoiceRoute(String pkg, int index) {
+        sp.edit().putInt(KEY_VOICE_ROUTE + pkg, index).apply();
+    }
+
     private static final String KEY_LOG_HOME_BUILD = "log_home_seen_build";
     private static final String KEY_LOG_BUTTON_BUILD = "log_button_seen_build";
 

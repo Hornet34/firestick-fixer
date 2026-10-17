@@ -195,4 +195,6 @@
     <string name="switch_back_hold">Hold ↩ Back to close an app</string>
     <string name="desc_back_hold">Hold Back for a moment inside any app to jump to your launcher and close the app.</string>
     <string name="switch_back_hold_tip">Holding ↩ Back for about 0.7 seconds inside an app takes you straight to your launcher and closes that app in the background, instead of pressing Back over and over. A short press still works as a normal Back. Not active on your launcher or Amazon\'s own screens.</string>
+    <string name="voice_panel_working">Opening search in %1$s…</string>
+    <string name="voice_panel_working_hint">↩ Back: cancel</string>
 </resources>
