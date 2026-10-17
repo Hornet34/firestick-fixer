@@ -278,6 +278,7 @@ public class HijackService extends AccessibilityService {
         }
         registerScreenOnReceiver();
         attachCover();
+        noteOsVersion();
         logWatcher = new LogWatcher(this, mainHandler, logListener);
         logWatcher.start();
         if (!logWatcher.isRunning()) scheduleLogGrantCheck();
@@ -1056,6 +1057,27 @@ public class HijackService extends AccessibilityService {
         }
     }
 
+    /**
+     * Notices a Fire OS update since the service last ran. Precise detection re-verifies
+     * itself per build anyway (see preciseMode); this tells the user, so a behaviour change
+     * right after an update has an obvious explanation.
+     */
+    private void noteOsVersion() {
+        String now = Build.DISPLAY;
+        String before = prefs.getLastOsBuild();
+        if (!now.equals(before)) {
+            prefs.setLastOsBuild(now);
+            if (before != null && !before.isEmpty()) {
+                RingLog.i(TAG, "Fire OS changed: " + before + " -> " + now);
+                prefs.setOsChangedFrom(before);
+                try {
+                    android.widget.Toast.makeText(this, getString(R.string.os_updated_toast, before, now),
+                            android.widget.Toast.LENGTH_LONG).show();
+                } catch (Exception ignored) { /* best effort */ }
+            }
+        }
+    }
+
     /** Remembers the last ordinary app in front (not Amazon's shell, Alexa or us). */
     private void trackUserApp(String pkg, String cls) {
         if (pkg == null || !isRealContentClass(cls)) return;
@@ -1091,6 +1113,10 @@ public class HijackService extends AccessibilityService {
         final String app = lastUserApp;
         RingLog.i(TAG, "Alexa search page up; app before it: " + app + " ("
                 + (System.currentTimeMillis() - lastUserAppAt) + "ms ago)");
+        if (app != null && prefs.isAlexaResultsApp(app)) {
+            RingLog.i(TAG, "Voice search: " + app + " is set to use Alexa's results");
+            return;
+        }
         if (app == null || System.currentTimeMillis() - lastUserAppAt > VOICE_ORIGIN_MAX_AGE_MS) {
             return;
         }
@@ -1172,6 +1198,7 @@ public class HijackService extends AccessibilityService {
             backHoldApp = null;
             backHoldRunnable = null;
             if (!fired) {
+                RingLog.i(TAG, "Back: short press passed on");
                 // A short press: hand the app its Back after all.
                 selfBackUntil = System.currentTimeMillis() + 600L;
                 performGlobalAction(GLOBAL_ACTION_BACK);
@@ -1303,8 +1330,11 @@ public class HijackService extends AccessibilityService {
             showWorking(voiceApp);
             // Close Alexa's results page first (Back on it returns to the app it opened
             // over), so Back from the app later never lands on Alexa's page again.
-            selfBackUntil = System.currentTimeMillis() + 600L;
-            performGlobalAction(GLOBAL_ACTION_BACK);
+            if (!testNoAlexaPage) {
+                selfBackUntil = System.currentTimeMillis() + 600L;
+                performGlobalAction(GLOBAL_ACTION_BACK);
+            }
+            testNoAlexaPage = false;
             final String app = voiceApp;
             final String query = voiceQuery;
             mainHandler.postDelayed(new Runnable() {
@@ -2717,12 +2747,25 @@ public class HijackService extends AccessibilityService {
      * app apart from the home shell without hardcoding package names.
      */
     private boolean isLeanbackLaunchable(String pkg) {
+        // Asked on nearly every window event for com.amazon.* packages, and each answer is
+        // a call into the package manager. Answers change only on install/uninstall, so
+        // they are cached for a while.
+        long now = System.currentTimeMillis();
+        Object[] hit = leanbackCache.get(pkg);
+        if (hit != null && now - (Long) hit[1] < LEANBACK_CACHE_MS) return (Boolean) hit[0];
+        boolean result;
         try {
-            return getPackageManager().getLeanbackLaunchIntentForPackage(pkg) != null;
+            result = getPackageManager().getLeanbackLaunchIntentForPackage(pkg) != null;
         } catch (Exception e) {
-            return false;
+            result = false;
         }
+        leanbackCache.put(pkg, new Object[]{result, now});
+        return result;
     }
+
+    private final java.util.HashMap<String, Object[]> leanbackCache =
+            new java.util.HashMap<String, Object[]>();
+    private static final long LEANBACK_CACHE_MS = 10 * 60_000L;
 
     /**
      * Sends the user to Amazon home by dispatching a system-level
@@ -4322,8 +4365,56 @@ public class HijackService extends AccessibilityService {
     /** adb shell dumpsys activity service io.github.hatim.firestickfixer/.HijackService */
     @Override
     protected void dump(java.io.FileDescriptor fd, java.io.PrintWriter pw, String[] args) {
+        if (args != null && args.length > 0) {
+            TestHooks.run(this, pw, args);
+            return;
+        }
         pw.println("FireStick Fixer, recent service log:");
         RingLog.dump(pw);
+    }
+
+    // ---- Test hooks (see TestHooks; reachable only through dumpsys, i.e. adb) ----
+
+    /** Set by the voice test hook: there is no real Alexa page to close with Back. */
+    volatile boolean testNoAlexaPage = false;
+
+    /** Feeds a synthetic key through the same path a remote key takes. */
+    boolean testKey(int keyCode, int action, int repeat, long downTime) {
+        KeyEvent e = new KeyEvent(downTime, System.currentTimeMillis(), action, keyCode, repeat);
+        return onKeyEvent(e);
+    }
+
+    /** Runs the voice hand-off for {@code app} as if Alexa had heard {@code query}. */
+    void testVoice(String app, String query) {
+        testNoAlexaPage = true;
+        lastUserApp = app;
+        lastUserAppAt = System.currentTimeMillis();
+        voiceFlowAt = System.currentTimeMillis();
+        showVoicePanel(app);
+        startVoiceCountdown(app, query);
+    }
+
+    /** Pretends the system log showed a remote app button opening {@code pkg}. */
+    void testButton(String pkg) {
+        handleButtonFromLog("test", pkg, System.currentTimeMillis());
+    }
+
+    /** A few lines of live state for the test script. */
+    void testState(java.io.PrintWriter pw) {
+        pw.println("target=" + prefs.getTargetPackage());
+        pw.println("hijack=" + prefs.isHijackEnabled() + " doubleTap=" + prefs.isEscapeDoublePress()
+                + " backStays=" + prefs.isBackStaysOnLauncher() + " backHold=" + prefs.isBackHoldExit());
+        pw.println("remap=" + prefs.isLaunchKeyEnabled() + " voice=" + prefs.isVoiceSearchToApp()
+                + " bootApp=" + prefs.getBootApp() + " launchOnBoot=" + prefs.getLaunchOnBoot());
+        pw.println("precise=" + preciseMode() + " preciseButtons=" + preciseButtons()
+                + " logWatcher=" + (logWatcher != null && logWatcher.isRunning()));
+        pw.println("escaped=" + stayOnAmazonHome + " foreground=" + currentForegroundPackage()
+                + " launcherMainScreen=" + targetRootSignature);
+        StringBuilder maps = new StringBuilder();
+        for (CustomMap m : prefs.getCustomMaps()) {
+            if (!m.app.isEmpty()) maps.append(m.window).append("->").append(m.app).append(' ');
+        }
+        pw.println("customMaps=" + maps.toString().trim());
     }
 
     @Override

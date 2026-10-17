@@ -39,6 +39,10 @@
             package visibility filtering hides it from us on API 30+.
         -->
         <package android:name="com.amazon.tv.quicksettings.ui" />
+        <!-- Read-only status of Fire OS's update components (Settings: Fire OS updates). -->
+        <package android:name="com.amazon.device.software.ota" />
+        <package android:name="com.amazon.device.software.ota.override" />
+        <package android:name="com.amazon.tv.forcedotaupdater.v2" />
     </queries>
 
     <application

@@ -35,6 +35,12 @@ final class RingLog {
         }
     }
 
+    static void clear() {
+        synchronized (LINES) {
+            LINES.clear();
+        }
+    }
+
     static void dump(PrintWriter pw) {
         synchronized (LINES) {
             for (String line : LINES) pw.println(line);

@@ -197,4 +197,21 @@
     <string name="switch_back_hold_tip">Holding ↩ Back for about 0.7 seconds inside an app takes you straight to your launcher and closes that app in the background, instead of pressing Back over and over. A short press still works as a normal Back. Not active on your launcher or Amazon\'s own screens.</string>
     <string name="voice_panel_working">Opening search in %1$s…</string>
     <string name="voice_panel_working_hint">↩ Back: cancel</string>
+    <string name="os_updated_toast">FireStick Fixer: Fire OS was updated (%1$s → %2$s). Checking that everything still works.</string>
+    <string name="alexa_apps_label">Apps that keep Alexa\'s results</string>
+    <string name="desc_alexa_apps">For these apps, Alexa voice search shows Alexa\'s own results instead.</string>
+    <string name="alexa_apps_tip">Press OK and pick an app to add it to the list; pick a listed app again to remove it. Useful for apps where Alexa\'s results are better than the app\'s own search.</string>
+    <string name="alexa_apps_pick_title">Add or remove an app</string>
+    <string name="alexa_apps_none">None</string>
+    <string name="alexa_apps_count">%1$d apps</string>
+    <string name="alexa_apps_added">%1$s: Alexa\'s results</string>
+    <string name="alexa_apps_removed">%1$s: searches in the app</string>
+    <string name="updates_label">Fire OS updates</string>
+    <string name="desc_updates">Amazon updates can change how Fire OS behaves. Press OK for your options.</string>
+    <string name="updates_tip">Shows whether Amazon\'s updater is active. FireStick Fixer re-checks its features after every Fire OS update. Press OK to see how to hold updates back.</string>
+    <string name="updates_auto">Automatic</string>
+    <string name="updates_blocked">Blocked</string>
+    <string name="updates_changed">updated from %1$s</string>
+    <string name="updates_dialog_title">Fire OS updates</string>
+    <string name="updates_dialog_body">This device runs %1$s.\n\nAmazon installs Fire OS updates automatically, and an app cannot switch that off. Two ways work:\n\n1. Router or Pi-hole (recommended, nothing changes on the TV): block\n   softwareupdates.amazon.com\n   updates.amazon.com\n   d1s31zyz7dcc2d.cloudfront.net\n   prod.ota-cloudfront.net\n   amzdigital-a.akamaihd.net\nDo NOT block ftv-smtv.ntp-fireos.com (the clock needs it).\n\n2. From a computer with adb (reversible; some builds refuse it):\n   adb shell pm disable-user --user 0 com.amazon.device.software.ota\n   adb shell pm disable-user --user 0 com.amazon.device.software.ota.override\n   adb shell pm disable-user --user 0 com.amazon.tv.forcedotaupdater.v2\nTo update again: the same with "pm enable &lt;package&gt;", then Settings → My Fire TV → About → Check for updates.\n\nIf Fire OS does update, FireStick Fixer re-checks itself and falls back to safe behaviour where something changed.</string>
 </resources>

@@ -239,6 +239,46 @@ public class Prefs {
         sp.edit().putInt(KEY_VOICE_ROUTE + pkg, index).apply();
     }
 
+    private static final String KEY_ALEXA_APPS = "voice_alexa_apps";
+    private static final String KEY_LAST_OS = "last_os_build";
+    private static final String KEY_OS_CHANGED_FROM = "os_changed_from";
+
+    /** Apps where Alexa's own results should stay (voice search is not handed to them). */
+    public java.util.Set<String> getAlexaResultsApps() {
+        return new java.util.HashSet<String>(
+                sp.getStringSet(KEY_ALEXA_APPS, java.util.Collections.<String>emptySet()));
+    }
+
+    public boolean isAlexaResultsApp(String pkg) {
+        return getAlexaResultsApps().contains(pkg);
+    }
+
+    /** Adds the app if absent, removes it if present; returns whether it is now listed. */
+    public boolean toggleAlexaResultsApp(String pkg) {
+        java.util.Set<String> set = getAlexaResultsApps();
+        boolean nowListed = set.add(pkg);
+        if (!nowListed) set.remove(pkg);
+        sp.edit().putStringSet(KEY_ALEXA_APPS, set).apply();
+        return nowListed;
+    }
+
+    public String getLastOsBuild() {
+        return sp.getString(KEY_LAST_OS, "");
+    }
+
+    public void setLastOsBuild(String build) {
+        sp.edit().putString(KEY_LAST_OS, build).apply();
+    }
+
+    /** The Fire OS build before the most recent update, or "" if none was seen. */
+    public String getOsChangedFrom() {
+        return sp.getString(KEY_OS_CHANGED_FROM, "");
+    }
+
+    public void setOsChangedFrom(String build) {
+        sp.edit().putString(KEY_OS_CHANGED_FROM, build).apply();
+    }
+
     private static final String KEY_LOG_HOME_BUILD = "log_home_seen_build";
     private static final String KEY_LOG_BUTTON_BUILD = "log_button_seen_build";
 

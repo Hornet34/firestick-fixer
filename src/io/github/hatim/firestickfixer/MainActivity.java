@@ -5,6 +5,7 @@ package io.github.hatim.firestickfixer;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -58,6 +59,10 @@ public class MainActivity extends Activity {
     /** Status row for the optional READ_LOGS grant, and its right-hand status text. */
     private LinearLayout preciseRow;
     private TextView preciseStatus;
+    /** Value box listing the apps that keep Alexa's own results. */
+    private TextView alexaAppsBox;
+    /** Status text of the Fire OS updates row. */
+    private TextView updatesStatus;
     /** Value box beside "Open an app at start-up": which app that is. */
     private TextView bootAppBox;
 
@@ -553,12 +558,14 @@ public class MainActivity extends Activity {
                 prefToggle(new PrefSetter() {
                     @Override public void set(boolean v) { prefs.setVoiceSearchToApp(v); }
                 }));
+        addAlexaAppsRow(buttons);
         addPreciseRow(buttons);
 
         LinearLayout startup = addCard(content, getString(R.string.section_startup));
         addBootRow(startup);
 
         LinearLayout system = addCard(content, getString(R.string.section_system));
+        addUpdatesRow(system);
         addVerboseRow(system);
     }
 
@@ -769,6 +776,156 @@ public class MainActivity extends Activity {
             b.setSpan(new android.text.style.TypefaceSpan("monospace"), start, end,
                     android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
+    }
+
+    /**
+     * "Apps that keep Alexa's results": OK opens the app list; picking an app adds it to
+     * the list, picking a listed app removes it again.
+     */
+    private void addAlexaAppsRow(LinearLayout card) {
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.HORIZONTAL);
+        outer.setGravity(Gravity.CENTER_VERTICAL);
+        final LinearLayout row = infoRow(titled(getString(R.string.alexa_apps_label), R.string.desc_alexa_apps));
+        outer.addView(row, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        alexaAppsBox = valueBox();
+        outer.addView(alexaAppsBox);
+        View.OnClickListener pick = new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                AppPicker.show(MainActivity.this, getString(R.string.alexa_apps_pick_title),
+                        new AppPicker.OnPicked() {
+                            @Override public void onPicked(String pkg) {
+                                if (pkg == null) return;
+                                boolean listed = prefs.toggleAlexaResultsApp(pkg);
+                                Toast.makeText(MainActivity.this, getString(listed
+                                        ? R.string.alexa_apps_added : R.string.alexa_apps_removed,
+                                        appLabel(pkg)), Toast.LENGTH_SHORT).show();
+                                refreshAlexaAppsBox();
+                            }
+                        });
+            }
+        };
+        row.setOnClickListener(pick);
+        alexaAppsBox.setOnClickListener(pick);
+        attachTip(row, getString(R.string.alexa_apps_tip));
+        attachTip(alexaAppsBox, getString(R.string.alexa_apps_tip));
+        alexaAppsRow = row;
+        card.addView(outer);
+        refreshAlexaAppsBox();
+    }
+
+    private LinearLayout alexaAppsRow, updatesRow;
+
+    private void refreshAlexaAppsBox() {
+        if (alexaAppsBox == null) return;
+        java.util.Set<String> apps = prefs.getAlexaResultsApps();
+        if (apps.isEmpty()) {
+            alexaAppsBox.setText(R.string.alexa_apps_none);
+        } else if (apps.size() == 1) {
+            alexaAppsBox.setText(appLabel(apps.iterator().next()));
+        } else {
+            alexaAppsBox.setText(getString(R.string.alexa_apps_count, apps.size()));
+        }
+    }
+
+    /** Focusable row with a title (and description) but no switch. */
+    private LinearLayout infoRow(CharSequence text) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(dp(16), dp(ROW_PAD_V + 4), dp(16), dp(ROW_PAD_V + 4));
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setFocusable(true);
+        row.setClickable(true);
+        row.setBackground(getDrawable(R.drawable.row_focus_bg));
+        TextView tv = new TextView(this);
+        tv.setText(text);
+        tv.setTextSize(18);
+        tv.setTextColor(Colors.NEUTRAL);
+        row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        return row;
+    }
+
+    /** Right-hand value box in the style of the other boxes. */
+    private TextView valueBox() {
+        TextView box = new TextView(this);
+        box.setTextSize(16);
+        box.setTextColor(Colors.WHITE);
+        box.setGravity(Gravity.CENTER);
+        box.setMinWidth(dp(56));
+        box.setMaxWidth(dp(320));
+        box.setSingleLine(true);
+        box.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        box.setPadding(dp(BOX_PAD_H), dp(ROW_PAD_V), dp(BOX_PAD_H), dp(ROW_PAD_V));
+        box.setBackground(getDrawable(R.drawable.target_chip_bg));
+        box.setFocusable(true);
+        box.setClickable(true);
+        box.setOnKeyListener(new RightNavGuard(null));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.leftMargin = dp(12);
+        box.setLayoutParams(lp);
+        return box;
+    }
+
+    /** Amazon's update components, as named on Fire OS 8.1.8.5. */
+    private static final String[] UPDATE_PKGS = {
+            "com.amazon.device.software.ota",
+            "com.amazon.device.software.ota.override",
+            "com.amazon.tv.forcedotaupdater.v2",
+    };
+
+    /**
+     * Read-only status of Fire OS updates plus how to control them. The app cannot switch
+     * Amazon's updater off itself (that needs adb or the router, see docs/DECISIONS.md).
+     */
+    private void addUpdatesRow(LinearLayout card) {
+        final LinearLayout row = infoRow(titled(getString(R.string.updates_label), R.string.desc_updates));
+        updatesStatus = new TextView(this);
+        updatesStatus.setTextSize(15);
+        row.addView(updatesStatus);
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                android.app.AlertDialog d = new android.app.AlertDialog.Builder(MainActivity.this,
+                        R.style.AppDialogTheme)
+                        .setTitle(R.string.updates_dialog_title)
+                        .setMessage(getString(R.string.updates_dialog_body, Build.DISPLAY))
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+                leftAlignDialogMessage(d);
+            }
+        });
+        row.setOnKeyListener(new RightNavGuard(null));
+        attachTip(row, getString(R.string.updates_tip));
+        updatesRow = row;
+        card.addView(row);
+    }
+
+    /** "Automatic" while any updater component is enabled, else "Blocked". */
+    private void refreshUpdatesRow() {
+        if (updatesStatus == null) return;
+        PackageManager pm = getPackageManager();
+        boolean anyActive = false;
+        boolean anyFound = false;
+        for (String p : UPDATE_PKGS) {
+            try {
+                pm.getPackageInfo(p, 0);
+                anyFound = true;
+                int st = pm.getApplicationEnabledSetting(p);
+                if (st != PackageManager.COMPONENT_ENABLED_STATE_DISABLED
+                        && st != PackageManager.COMPONENT_ENABLED_STATE_DISABLED_USER) {
+                    anyActive = true;
+                }
+            } catch (Exception ignored) {
+                // not on this build
+            }
+        }
+        boolean blocked = anyFound && !anyActive;
+        String changed = prefs.getOsChangedFrom();
+        updatesStatus.setText("● " + getString(blocked ? R.string.updates_blocked : R.string.updates_auto)
+                + (changed.isEmpty() ? "" : "  · " + getString(R.string.updates_changed, changed)));
+        updatesStatus.setTextColor(blocked ? Colors.BRAND : Colors.AMBER);
     }
 
     private void refreshPreciseRow() {
@@ -2466,7 +2623,7 @@ public class MainActivity extends Activity {
         View voiceRow = rowOf(voiceSwitch);
         View holdRow = rowOf(backHoldSwitch);
         View[] column = {initialFocus, accessRow, hijackRow, backRow, holdRow, launchKeyRow, voiceRow,
-                preciseRow, bootRow, verboseRow};
+                alexaAppsRow, preciseRow, bootRow, updatesRow, verboseRow};
         for (View v : column) {
             ensureId(v);
         }
@@ -2499,10 +2656,15 @@ public class MainActivity extends Activity {
             if (accessRow != null) coverBox.setNextFocusUpId(accessRow.getId());
             if (launchKeyRow != null) coverBox.setNextFocusDownId(launchKeyRow.getId());
         }
+        if (alexaAppsBox != null) {
+            ensureId(alexaAppsBox);
+            if (voiceRow != null) alexaAppsBox.setNextFocusUpId(voiceRow.getId());
+            if (preciseRow != null) alexaAppsBox.setNextFocusDownId(preciseRow.getId());
+        }
         if (bootAppBox != null) {
             ensureId(bootAppBox);
             if (preciseRow != null) bootAppBox.setNextFocusUpId(preciseRow.getId());
-            if (verboseRow != null) bootAppBox.setNextFocusDownId(verboseRow.getId());
+            if (updatesRow != null) bootAppBox.setNextFocusDownId(updatesRow.getId());
         }
         if (logBtn != null && bootRow != null) {
             logBtn.setNextFocusUpId(bootRow.getId());
@@ -2857,6 +3019,8 @@ public class MainActivity extends Activity {
         refreshBootBox();
         refreshPreciseRow();
         refreshSetupBanner();
+        refreshAlexaAppsBox();
+        refreshUpdatesRow();
     }
 
     /**
