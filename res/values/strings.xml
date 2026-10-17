@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name">FireStick Fixer</string>
     <string name="service_label">FireStick Fixer Service</string>
-    <string name="repo_url">https://github.com/toolicious/home-on-fire</string>
+    <string name="repo_url">https://github.com/Hornet34/firestick-fixer</string>
 
     <!--
         Shown by Android in Settings → Accessibility next to the toggle
