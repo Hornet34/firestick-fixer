@@ -181,4 +181,7 @@
     <string name="setup_service">Switch on "Accessibility service" below.</string>
     <string name="setup_logs_restart">Takes effect by itself within half a minute.</string>
     <string name="voice_no_search_box">FireStick Fixer: couldn\'t find a search box in %1$s</string>
+    <string name="voice_panel_title">Searching in %1$s</string>
+    <string name="voice_panel_listening">…</string>
+    <string name="voice_panel_hint">↩ Back: show Alexa\'s results instead   ·   ◉ OK: search now</string>
 </resources>

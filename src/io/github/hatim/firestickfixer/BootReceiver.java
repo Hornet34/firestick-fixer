@@ -30,6 +30,13 @@ public class BootReceiver extends BroadcastReceiver {
 
         Prefs prefs = new Prefs(ctx);
         if (!prefs.getLaunchOnBoot()) return;
+        // Fire OS delivers BOOT_COMPLETED to apps one by one; ours arrived ~1 min after
+        // boot. The accessibility service normally opened the start-up app long before,
+        // and opening it again now would pull the user out of whatever they started since.
+        if (HijackService.sBootLaunchDone) {
+            Log.i(HijackService.TAG, "Boot: start-up app already opened by the service");
+            return;
+        }
         // Honour the dependency the UI advertises: with the accessibility
         // service off, the grayed-out boot switch should be truthful and
         // no boot launch happens.

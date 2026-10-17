@@ -631,15 +631,50 @@ public class HijackService extends AccessibilityService {
      * screen; BOOT_COMPLETED arrives seconds later. Launch the target now and cover the
      * screen until it paints, so the device comes up on the launcher, not Amazon home.
      */
+    /**
+     * True once the service has opened the start-up app for this boot, so the boot
+     * broadcast (which Fire OS delivers about a minute after boot, app by app) does not
+     * open it a second time over whatever the user is doing by then.
+     */
+    static volatile boolean sBootLaunchDone = false;
+    /** Waiting for Amazon home's first appearance after boot to open the start-up app. */
+    private volatile boolean bootLaunchPending = false;
+    /** When the start-up app was opened, and the Home-press count at that moment. */
+    private long bootLaunchAt = 0L;
+    private int bootLaunchHomeSeq = -1;
+    /** Amazon-home events this soon after the boot launch are its start-up, not Home presses. */
+    private static final long BOOT_SETTLE_MS = 8_000L;
+
+    /**
+     * Right after boot the service connects ~22 s after power-on, a fraction of a second
+     * BEFORE Amazon home starts (measured on Fire OS 8.1.8.5). Opening the start-up app
+     * then would put it under Amazon home, so it is opened on Amazon home's first window
+     * instead (see onAccessibilityEvent), or right now if Amazon home is already up.
+     * Independent of the Home redirect switch: it is its own feature.
+     */
     private void maybeLaunchAtBoot() {
         if (android.os.SystemClock.elapsedRealtime() > BOOT_WINDOW_MS) return;
-        if (!prefs.isHijackEnabled() || !prefs.getLaunchOnBoot()) return;
+        if (!prefs.getLaunchOnBoot() || sBootLaunchDone) return;
         String app = prefs.getBootApp();
         if (app == null || app.isEmpty() || app.equals(getPackageName())) return;
-        String fg = currentForegroundPackage();
-        if (fg != null && !AMAZON_LAUNCHER.equals(fg)) return;
+        if (AMAZON_LAUNCHER.equals(currentForegroundPackage())) {
+            launchBootApp("Amazon home already up after boot");
+        } else {
+            bootLaunchPending = true;
+            Log.i(TAG, "Boot: waiting for Amazon home to open " + app);
+        }
+    }
+
+    private void launchBootApp(String why) {
+        bootLaunchPending = false;
+        String app = prefs.getBootApp();
+        if (app == null || app.isEmpty()) return;
         showButtonCover(app);
-        launchTarget(app, "Service up right after boot", false);
+        if (launchTarget(app, "Boot: " + why, false)) {
+            sBootLaunchDone = true;
+            bootLaunchAt = System.currentTimeMillis();
+            bootLaunchHomeSeq = homePressSeq;
+        }
     }
 
     /** Outermost scrolling container of a window, as "class@bounds", or null. */
@@ -793,6 +828,9 @@ public class HijackService extends AccessibilityService {
                     field.recycle();
                 }
             }
+            if (mayClickSearch && clickSearchByRecipe(app, root)) {
+                return TYPE_CLICKED_SEARCH;
+            }
             if (mayClickSearch) {
                 AccessibilityNodeInfo button = findNode(root, 0, false);
                 if (button != null) {
@@ -849,6 +887,70 @@ public class HijackService extends AccessibilityService {
         return null;
     }
 
+    /**
+     * Per-app ways to reach a search screen whose button carries no label. Kept to a
+     * table of tiny recipes so another app needs a few lines, not a new mechanism.
+     *
+     * Nuvio (com.nuvio.tv): a left side menu of unlabeled icons. From its source
+     * (NuvioMedia/NuvioTV, MainActivity drawer items) the order is Home, [Discover when
+     * placed in the sidebar], Search, Library, Settings; when Discover sits in the top
+     * bar instead, the top bar carries an "Open discover" button.
+     */
+    private boolean clickSearchByRecipe(String app, AccessibilityNodeInfo root) {
+        if (!"com.nuvio.tv".equals(app)) return false;
+        int screenW = getResources().getDisplayMetrics().widthPixels;
+        java.util.List<AccessibilityNodeInfo> rail = new java.util.ArrayList<AccessibilityNodeInfo>();
+        boolean[] discoverOnTop = {false};
+        collectRail(root, 0, screenW / 10, rail, discoverOnTop);
+        java.util.Collections.sort(rail, new java.util.Comparator<AccessibilityNodeInfo>() {
+            @Override public int compare(AccessibilityNodeInfo a, AccessibilityNodeInfo b) {
+                android.graphics.Rect ra = new android.graphics.Rect();
+                android.graphics.Rect rb = new android.graphics.Rect();
+                a.getBoundsInScreen(ra);
+                b.getBoundsInScreen(rb);
+                return ra.top - rb.top;
+            }
+        });
+        int index = discoverOnTop[0] ? 1 : 2;
+        boolean clicked = false;
+        if (rail.size() > index) {
+            clicked = rail.get(index).performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            Log.i(TAG, "Voice search: Nuvio side menu item " + (index + 1) + " of "
+                    + rail.size() + " clicked=" + clicked);
+        }
+        for (AccessibilityNodeInfo n : rail) n.recycle();
+        return clicked;
+    }
+
+    /** Clickable items in the narrow strip on the left edge (Nuvio's side menu). */
+    private static void collectRail(AccessibilityNodeInfo node, int depth, int maxRight,
+                                    java.util.List<AccessibilityNodeInfo> out, boolean[] discoverOnTop) {
+        if (node == null || depth > 30) return;
+        CharSequence desc = node.getContentDescription();
+        if (desc != null && desc.toString().toLowerCase(java.util.Locale.ROOT).contains("discover")) {
+            android.graphics.Rect b = new android.graphics.Rect();
+            node.getBoundsInScreen(b);
+            if (b.left > maxRight) discoverOnTop[0] = true;
+        }
+        if (node.isClickable() && node.isVisibleToUser()) {
+            android.graphics.Rect b = new android.graphics.Rect();
+            node.getBoundsInScreen(b);
+            if (b.right <= maxRight && b.height() > 40) {
+                out.add(AccessibilityNodeInfo.obtain(node));
+                return;
+            }
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo c = node.getChild(i);
+            if (c == null) continue;
+            try {
+                collectRail(c, depth + 1, maxRight, out, discoverOnTop);
+            } finally {
+                c.recycle();
+            }
+        }
+    }
+
     private static boolean namesSearch(AccessibilityNodeInfo n) {
         CharSequence[] parts = {n.getText(), n.getContentDescription(), n.getViewIdResourceName()};
         for (CharSequence c : parts) {
@@ -902,6 +1004,10 @@ public class HijackService extends AccessibilityService {
         // The launcher is home: there is no "app you were in" to search.
         if (app.equals(prefs.getTargetPackage())) return;
         final int token = ++voiceReadToken;
+        // Cover Alexa's page right away with the decision panel: it hides the page and,
+        // later, the switch to the app, and gives the user a moment to keep Alexa's
+        // results instead (Back).
+        showVoicePanel(app);
         // Amazon marks the query line "not important for accessibility", which hides it
         // from services by default. Ask for hidden views only while reading this page;
         // the rest of the service keeps working on the normal, smaller trees.
@@ -912,31 +1018,173 @@ public class HijackService extends AccessibilityService {
         for (final long delay : VOICE_READ_DELAYS_MS) {
             mainHandler.postDelayed(new Runnable() {
                 @Override public void run() {
-                    if (token != voiceReadToken) return; // already handled
+                    if (token != voiceReadToken) return; // already handled or cancelled
                     String query = readAlexaQuery();
                     if (query == null) {
                         if (delay == VOICE_READ_DELAYS_MS[VOICE_READ_DELAYS_MS.length - 1]) {
                             Log.i(TAG, "Voice search: no spoken text found on Alexa's page");
+                            hideVoicePanel();
                         }
                         return;
                     }
                     voiceReadToken++; // done: later retries stand down
                     setIncludeHiddenViews(false);
-                    Intent search = searchIntentFor(app, query);
-                    if (search == null) {
-                        typeSearchInto(app, query);
-                        return;
-                    }
-                    showButtonCover(app);
-                    try {
-                        startActivity(search);
-                        Log.i(TAG, "Voice search sent to " + app);
-                    } catch (Exception e) {
-                        hideButtonCover();
-                        Log.w(TAG, "Voice search to " + app + " failed: " + e);
-                    }
+                    startVoiceCountdown(app, query);
                 }
             }, delay);
+        }
+    }
+
+    /** How long the decision panel waits before searching in the app. */
+    private static final long VOICE_CHOICE_MS = 2_000L;
+    private android.view.View voicePanel;
+    private android.widget.TextView voicePanelQuery;
+    private android.widget.ProgressBar voicePanelBar;
+    /** True while the panel is up and the user can still choose; keys go to it. */
+    private volatile boolean voiceChoicePending = false;
+    private Runnable voiceGo;
+    private String voiceApp, voiceQuery;
+
+    /**
+     * Full-screen panel over Alexa's search page: the app's icon, the spoken words once
+     * read, a filling bar, and the hint that Back keeps Alexa's results. Not focusable;
+     * the service sees the keys first and handles them while the choice is open.
+     */
+    private void showVoicePanel(String app) {
+        if (windowManager == null) return;
+        hideVoicePanel();
+        float d = getResources().getDisplayMetrics().density;
+        android.widget.LinearLayout col = new android.widget.LinearLayout(this);
+        col.setOrientation(android.widget.LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER);
+        col.setBackgroundColor(0xF20B1220);
+        android.widget.ImageView icon = new android.widget.ImageView(this);
+        try {
+            icon.setImageDrawable(getPackageManager().getApplicationIcon(app));
+        } catch (Exception ignored) { /* icon optional */ }
+        col.addView(icon, new android.widget.LinearLayout.LayoutParams((int) (96 * d), (int) (96 * d)));
+        android.widget.TextView title = new android.widget.TextView(this);
+        title.setText(getString(R.string.voice_panel_title, appName(app)));
+        title.setTextColor(0xFFFFFFFF);
+        title.setTextSize(26);
+        title.setGravity(Gravity.CENTER);
+        title.setPadding(0, (int) (24 * d), 0, (int) (8 * d));
+        col.addView(title);
+        voicePanelQuery = new android.widget.TextView(this);
+        voicePanelQuery.setText(R.string.voice_panel_listening);
+        voicePanelQuery.setTextColor(0xFF2DD4BF);
+        voicePanelQuery.setTextSize(30);
+        voicePanelQuery.setGravity(Gravity.CENTER);
+        col.addView(voicePanelQuery);
+        voicePanelBar = new android.widget.ProgressBar(this, null,
+                android.R.attr.progressBarStyleHorizontal);
+        voicePanelBar.setMax(1000);
+        voicePanelBar.setProgress(0);
+        voicePanelBar.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFF2DD4BF));
+        android.widget.LinearLayout.LayoutParams barLp = new android.widget.LinearLayout.LayoutParams(
+                (int) (420 * d), (int) (8 * d));
+        barLp.topMargin = (int) (28 * d);
+        col.addView(voicePanelBar, barLp);
+        android.widget.TextView hint = new android.widget.TextView(this);
+        hint.setText(R.string.voice_panel_hint);
+        hint.setTextColor(0xFF94A3B8);
+        hint.setTextSize(18);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, (int) (24 * d), 0, 0);
+        col.addView(hint);
+        try {
+            windowManager.addView(col, maskLayoutParams());
+            voicePanel = col;
+            voiceChoicePending = true;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to show the voice panel", e);
+        }
+    }
+
+    /** The words are known: show them and run the bar; when it is full, search in the app. */
+    private void startVoiceCountdown(final String app, final String query) {
+        voiceApp = app;
+        voiceQuery = query;
+        if (voicePanel == null || !voiceChoicePending) {
+            runVoiceHandoff(app, query);
+            return;
+        }
+        voicePanelQuery.setText("\u201C" + query + "\u201D");
+        android.animation.ObjectAnimator.ofInt(voicePanelBar, "progress", 0, 1000)
+                .setDuration(VOICE_CHOICE_MS).start();
+        voiceGo = new Runnable() {
+            @Override public void run() { voiceDecide(true); }
+        };
+        mainHandler.postDelayed(voiceGo, VOICE_CHOICE_MS);
+    }
+
+    /** Ends the choice: search in the app ({@code inApp}) or leave Alexa's results. */
+    private void voiceDecide(boolean inApp) {
+        if (!voiceChoicePending) return;
+        voiceChoicePending = false;
+        if (voiceGo != null && mainHandler != null) mainHandler.removeCallbacks(voiceGo);
+        voiceGo = null;
+        if (inApp && voiceApp != null && voiceQuery != null) {
+            // The black cover takes over from the panel until the app has painted.
+            showButtonCover(voiceApp);
+            hideVoicePanel();
+            runVoiceHandoff(voiceApp, voiceQuery);
+        } else {
+            voiceReadToken++; // stop any read still pending
+            setIncludeHiddenViews(false);
+            hideVoicePanel();
+            Log.i(TAG, "Voice search: kept Alexa's results");
+        }
+        voiceApp = null;
+        voiceQuery = null;
+    }
+
+    private void hideVoicePanel() {
+        voiceChoicePending = false;
+        if (voicePanel != null) {
+            try {
+                if (windowManager != null) windowManager.removeView(voicePanel);
+            } catch (Exception ignored) {
+                // already gone
+            }
+            voicePanel = null;
+        }
+    }
+
+    /**
+     * Keys while the panel is up: Back keeps Alexa's results, OK searches right away,
+     * everything else is held back so it cannot act on the hidden page underneath.
+     * Returns true when the key was taken.
+     */
+    private boolean handleVoicePanelKey(KeyEvent event) {
+        if (!voiceChoicePending) return false;
+        if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+            int k = event.getKeyCode();
+            if (k == KeyEvent.KEYCODE_BACK) {
+                voiceDecide(false);
+            } else if ((k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER)
+                    && voiceQuery != null) {
+                voiceDecide(true);
+            }
+        }
+        consumedDownKey = event.getKeyCode();
+        return true;
+    }
+
+    /** Hands the spoken words to the app: a search link or intent, else typing. */
+    private void runVoiceHandoff(String app, String query) {
+        Intent search = searchIntentFor(app, query);
+        if (search == null) {
+            typeSearchInto(app, query);
+            return;
+        }
+        showButtonCover(app);
+        try {
+            startActivity(search);
+            Log.i(TAG, "Voice search sent to " + app);
+        } catch (Exception e) {
+            hideButtonCover();
+            Log.w(TAG, "Voice search to " + app + " failed: " + e);
         }
     }
 
@@ -1474,6 +1722,19 @@ public class HijackService extends AccessibilityService {
             }
         }
         if (isAmazonHome) {
+            if (bootLaunchPending) {
+                if (android.os.SystemClock.elapsedRealtime() < BOOT_WINDOW_MS) {
+                    launchBootApp("Amazon home came up after boot");
+                    return;
+                }
+                bootLaunchPending = false;
+            }
+            // Amazon home finishing its own start-up right after the boot launch: leave
+            // the start-up app alone unless the user has pressed Home since.
+            if (bootLaunchAt != 0L && System.currentTimeMillis() - bootLaunchAt < BOOT_SETTLE_MS
+                    && homePressSeq == bootLaunchHomeSeq) {
+                return;
+            }
             handleAmazonHomeArrival();
         }
     }
@@ -2311,6 +2572,7 @@ public class HijackService extends AccessibilityService {
         if (isDown) {
             trackKeyState(keyCode);
         }
+        if (handleVoicePanelKey(event)) return true;
         if (prefs.isVerboseLogging()) {
             // Raw key trace incl. scan code: tells which remote buttons reach the
             // accessibility filter at all on a given Fire OS build.
@@ -3347,6 +3609,7 @@ public class HijackService extends AccessibilityService {
         consumedDownKey = -1;
         cancelMask();
         detachCover();
+        hideVoicePanel();
         if (logWatcher != null) logWatcher.stop();
         if (screenOnReceiver != null) {
             try {
