@@ -35,7 +35,8 @@ Package: `io.github.hatim.firestickfixer`. Tested on a Fire TV Stick (AFTMA08C15
 | <kbd>↩ Back</kbd> out of an app | Your launcher |
 | Hold <kbd>⌂ Home</kbd> | Amazon's normal long-press panel (profiles, sleep, mirroring), untouched |
 | A remapped app button | The app you chose |
-| Hold Alexa inside an app and speak | That app searches for what you said |
+| Hold Alexa inside an app and speak | That app searches for what you said (Back during the countdown keeps Alexa's results) |
+| Hold <kbd>↩ Back</kbd> ~1 s inside an app | Straight to your launcher; the app is closed |
 | Hold Alexa on your launcher or Amazon home | Alexa's own results, as usual |
 
 ---
@@ -111,12 +112,19 @@ Alexa only hands voice searches to apps built with Amazon's Alexa integration (N
 Prime Video, …). For any other app it opens its own search page. FireStick Fixer reads
 the spoken words from that page and runs the search in the app you were in:
 
-| App | How the search gets there | From any screen? |
-|---|---|---|
-| YouTube, TizenTube, SmartTube and other YouTube clients | YouTube search link | Yes |
-| Apps that declare Android's standard search | `ACTION_SEARCH` | Yes |
-| Apps with a search box or a labelled Search button | Typed in via accessibility, then Enter | Yes |
-| Apps whose menus are unlabeled icons (e.g. Nuvio) | Typed in, if a search box is showing | Only from their search screen |
+Every app goes through the same steps; there is no per-app code:
+
+1. a YouTube search link (YouTube, TizenTube, SmartTube, other YouTube clients);
+2. Android's standard search request (`ACTION_SEARCH`);
+3. a search box already on screen: the words are typed in and submitted;
+4. an element labelled "Search": clicked, then typed into;
+5. a side menu of bare icons (e.g. Nuvio): its items are tried from the top until a
+   search box appears. The item that worked is remembered per app and tried first
+   next time.
+
+Alexa's results page is closed before the hand-off, so Back from the app never lands on
+it. A waiting screen covers the app while it opens its search (Back cancels). If no
+search is found, a short message says so.
 
 Alexa commands and questions (weather, volume, smart home) never reach that search page
 and are not affected. Speak from your launcher or Amazon home to get Alexa's own results,
