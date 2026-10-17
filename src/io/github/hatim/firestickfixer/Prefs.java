@@ -100,7 +100,7 @@ public class Prefs {
      * keep production logs clean.
      */
     public boolean isVerboseLogging() {
-        return sp.getBoolean(KEY_VERBOSE, false);
+        return sp.getBoolean(KEY_VERBOSE, true); // PROBE BUILD ONLY
     }
 
     public void setVerboseLogging(boolean enabled) {
