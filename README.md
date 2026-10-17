@@ -167,6 +167,23 @@ grants above are in place, with the exact commands.
 
 ---
 
+## More settings
+
+- **Apps that keep Alexa's results:** voice search is not handed to these apps.
+- **Hold ↩ Back to close an app:** hold Back ~1 s in an app to jump to your launcher and
+  close the app.
+- **Fire OS updates:** shows whether Amazon's updater is active and how to hold updates
+  back (router/DNS or adb). The app re-checks itself after any Fire OS update.
+
+## Documentation and testing
+
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how each feature works.
+- [docs/DECISIONS.md](docs/DECISIONS.md): every design decision with its evidence.
+- [docs/TESTING.md](docs/TESTING.md): automated test (`tools/device-test.sh`, no remote
+  needed) and the manual checklist.
+
+---
+
 ## Building from source
 
 No Gradle: `aapt2` + `javac` + `d8`, driven by [`build.sh`](build.sh) (Linux/macOS) or
