@@ -180,11 +180,10 @@
     <string name="setup_logs">Recommended · instant ⌂ Home, exact double-tap, button-only remapping</string>
     <string name="setup_service">Switch on "Accessibility service" below.</string>
     <string name="setup_logs_restart">Takes effect by itself within half a minute.</string>
-    <string name="voice_no_search_box">Couldn\'t find a search in %1$s. Next time Alexa\'s results will stay for this app.</string>
+    <string name="voice_no_search_box">Couldn\'t find a search in %1$s.</string>
     <string name="voice_panel_title">Searching in %1$s</string>
     <string name="voice_panel_listening">…</string>
     <string name="voice_panel_hint">↩ Back: show Alexa\'s results instead   ·   ◉ OK: search now</string>
-    <string name="voice_no_search_notice">%1$s has no search FireStick Fixer can use, so here are Alexa\'s results.</string>
     <string name="desc_accessibility">Lets FireStick Fixer notice Home, Back and remote buttons. Everything below needs it.</string>
     <string name="desc_hijack">Home takes you to your launcher. Double-tap Home for Amazon\'s home screen.</string>
     <string name="desc_back">Stops Back from dropping you onto Amazon\'s home screen. Menus still close.</string>
@@ -193,4 +192,7 @@
     <string name="desc_precise">Faster, exact detection of Home and app buttons (one-time adb step).</string>
     <string name="desc_boot">Opens the chosen app when the Fire TV starts or wakes up.</string>
     <string name="desc_verbose">Only for troubleshooting. Leave off.</string>
+    <string name="switch_back_hold">Hold ↩ Back to close an app</string>
+    <string name="desc_back_hold">Hold Back for a moment inside any app to jump to your launcher and close the app.</string>
+    <string name="switch_back_hold_tip">Holding ↩ Back for about 0.7 seconds inside an app takes you straight to your launcher and closes that app in the background, instead of pressing Back over and over. A short press still works as a normal Back. Not active on your launcher or Amazon\'s own screens.</string>
 </resources>

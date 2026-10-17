@@ -160,7 +160,7 @@ public class HijackService extends AccessibilityService {
                 present = false;
             }
             quickSettingsUiPresent = present;
-            Log.i(TAG, "Long-press panel source: " + (present
+            RingLog.i(TAG, "Long-press panel source: " + (present
                     ? QUICKSETTINGS_PKG + " (new Fire TV UI; settings HUD left alone)"
                     : AMAZON_SETTINGS_PKG + " HUD (no " + QUICKSETTINGS_PKG + " on this build)"));
         }
@@ -532,13 +532,13 @@ public class HijackService extends AccessibilityService {
         if (at - ownHomeDispatchAt < 800L) return; // our own GLOBAL_ACTION_HOME
         if (!Build.DISPLAY.equals(prefs.getLogHomeSeenBuild())) {
             prefs.setLogHomeSeenBuild(Build.DISPLAY);
-            Log.i(TAG, "Home presses visible in the system log on " + Build.DISPLAY);
+            RingLog.i(TAG, "Home presses visible in the system log on " + Build.DISPLAY);
         }
         prevHomePressAt = lastHomePressAt;
         lastHomePressAt = at;
         homePressSeq++;
         if (prefs.isVerboseLogging()) {
-            Log.i(TAG, "Home press #" + homePressSeq + " (log), "
+            RingLog.i(TAG, "Home press #" + homePressSeq + " (log), "
                     + (prevHomePressAt == 0L ? "first" : (at - prevHomePressAt) + "ms after the last"));
         }
         if (!prefs.isHijackEnabled()) return;
@@ -558,7 +558,7 @@ public class HijackService extends AccessibilityService {
                     if (stayOnAmazonHome && target.equals(currentForegroundPackage())) {
                         ownHomeDispatchAt = System.currentTimeMillis();
                         performGlobalAction(GLOBAL_ACTION_HOME);
-                        Log.i(TAG, "Double-press landed under the launcher, back to Amazon home");
+                        RingLog.i(TAG, "Double-press landed under the launcher, back to Amazon home");
                     }
                 }
             };
@@ -590,7 +590,7 @@ public class HijackService extends AccessibilityService {
         if (!Build.DISPLAY.equals(prefs.getLogButtonSeenBuild())) {
             prefs.setLogButtonSeenBuild(Build.DISPLAY);
         }
-        if (prefs.isVerboseLogging()) Log.i(TAG, "Remote button " + button + " opened " + pkg);
+        if (prefs.isVerboseLogging()) RingLog.i(TAG, "Remote button " + button + " opened " + pkg);
         if (!prefs.isLaunchKeyEnabled()) return;
         if (windowMatches(pkg, null, prefs.getLaunchWindow())) {
             handleWindowLaunch(pkg);
@@ -661,7 +661,7 @@ public class HijackService extends AccessibilityService {
             launchBootApp("Amazon home already up after boot");
         } else {
             bootLaunchPending = true;
-            Log.i(TAG, "Boot: waiting for Amazon home to open " + app);
+            RingLog.i(TAG, "Boot: waiting for Amazon home to open " + app);
         }
     }
 
@@ -728,7 +728,7 @@ public class HijackService extends AccessibilityService {
                 String sig = currentTargetSignature(target);
                 if (sig != null && !sig.equals(targetRootSignature)) {
                     targetRootSignature = sig;
-                    Log.i(TAG, "Launcher main screen learned: " + sig);
+                    RingLog.i(TAG, "Launcher main screen learned: " + sig);
                 }
             }
         };
@@ -744,14 +744,13 @@ public class HijackService extends AccessibilityService {
         String now = currentTargetSignature(target);
         boolean swallow = learned.equals(now);
         if (prefs.isVerboseLogging()) {
-            Log.i(TAG, "Back in launcher: screen=" + now + (swallow
+            RingLog.i(TAG, "Back in launcher: screen=" + now + (swallow
                     ? " is the main screen, ignoring Back" : " is not the main screen, passing"));
         }
         return swallow;
     }
 
     /** When the typing fallback looks at the app again after bringing it to the front. */
-    private static final long[] TYPE_SEARCH_DELAYS_MS = {700L, 1300L, 1900L, 2600L, 3400L, 4400L};
     private int typeSearchToken = 0;
 
     /**
@@ -764,49 +763,76 @@ public class HijackService extends AccessibilityService {
     private void typeSearchInto(final String app, final String query) {
         Intent launch = launchIntentFor(app);
         if (launch == null || mainHandler == null) return;
-        showButtonCover(app);
+        // Covered for the whole attempt, so the user does not watch screens change; the
+        // cover is keyed to no app, so the app's own window events do not lift it early.
+        showButtonCover(TYPING_COVER, TYPE_SEARCH_MAX_MS + 1_000L);
         try {
             startActivity(launch); // an existing task just comes back to the front
         } catch (Exception e) {
             hideButtonCover();
             return;
         }
-        Log.i(TAG, "Voice search: typing into " + app);
+        RingLog.i(TAG, "Voice search: typing into " + app);
+        sideMenuNext = 0;
         final int token = ++typeSearchToken;
-        final boolean[] clickedSearch = {false};
-        for (int i = 0; i < TYPE_SEARCH_DELAYS_MS.length; i++) {
-            final boolean last = i == TYPE_SEARCH_DELAYS_MS.length - 1;
-            mainHandler.postDelayed(new Runnable() {
-                @Override public void run() {
-                    if (token != typeSearchToken) return;
-                    int r = trySearchByTyping(app, query, !clickedSearch[0]);
-                    if (r == TYPE_DONE) {
-                        typeSearchToken++;
-                        prefs.setVoiceSearchFailed(app, false);
-                        Log.i(TAG, "Voice search typed into " + app);
-                    } else if (r == TYPE_CLICKED_SEARCH) {
-                        clickedSearch[0] = true;
-                    } else if (last) {
-                        typeSearchToken++;
-                        hideButtonCover();
-                        // Remembered, so next time Alexa's results stay up for this app.
-                        prefs.setVoiceSearchFailed(app, true);
-                        Log.i(TAG, "Voice search: no search box found in " + app);
-                        android.widget.Toast.makeText(HijackService.this,
-                                getString(R.string.voice_no_search_box, appName(app)),
-                                android.widget.Toast.LENGTH_LONG).show();
-                    }
+        final long start = System.currentTimeMillis();
+        final long[] lastMenuClick = {0L};
+        final boolean[] clickedLabel = {false};
+        Runnable poll = new Runnable() {
+            @Override public void run() {
+                if (token != typeSearchToken) return;
+                long now = System.currentTimeMillis();
+                long sinceStart = now - start;
+                long sinceMenu = now - lastMenuClick[0];
+                // Settle first: an app brought back to the front can take seconds to
+                // rebuild its screen (Nuvio's search box: up to ~4 s). Only after that,
+                // and after each menu click, is "no search box" an answer.
+                boolean mayAct = sinceStart >= TYPE_SETTLE_MS
+                        && (lastMenuClick[0] == 0L || sinceMenu >= TYPE_ITEM_WAIT_MS);
+                int r = trySearchByTyping(app, query, mayAct && !clickedLabel[0], mayAct);
+                if (r == TYPE_DONE) {
+                    typeSearchToken++;
+                    RingLog.i(TAG, "Voice search typed into " + app + " after " + sinceStart + "ms");
+                    // Let the results start drawing before the cover lifts.
+                    mainHandler.postDelayed(new Runnable() {
+                        @Override public void run() { hideButtonCover(); }
+                    }, 600L);
+                    return;
                 }
-            }, TYPE_SEARCH_DELAYS_MS[i]);
-        }
+                if (r == TYPE_CLICKED_SEARCH) {
+                    clickedLabel[0] = true;
+                    lastMenuClick[0] = now;
+                } else if (r == TYPE_REVEALED_MENU) {
+                    lastMenuClick[0] = now;
+                } else if (r == TYPE_GAVE_UP || sinceStart > TYPE_SEARCH_MAX_MS) {
+                    typeSearchToken++;
+                    hideButtonCover();
+                    RingLog.i(TAG, "Voice search: no search box found in " + app);
+                    android.widget.Toast.makeText(HijackService.this,
+                            getString(R.string.voice_no_search_box, appName(app)),
+                            android.widget.Toast.LENGTH_LONG).show();
+                    return;
+                }
+                mainHandler.postDelayed(this, TYPE_POLL_MS);
+            }
+        };
+        mainHandler.postDelayed(poll, TYPE_POLL_MS);
     }
+
+    private static final String TYPING_COVER = "(typing)";
+    private static final long TYPE_POLL_MS = 300L;
+    private static final long TYPE_SETTLE_MS = 3_500L;
+    private static final long TYPE_ITEM_WAIT_MS = 2_500L;
+    private static final long TYPE_SEARCH_MAX_MS = 16_000L;
 
     private static final int TYPE_NOT_YET = 0;
     private static final int TYPE_DONE = 1;
     private static final int TYPE_CLICKED_SEARCH = 2;
     private static final int TYPE_REVEALED_MENU = 3;
+    private static final int TYPE_GAVE_UP = 4;
 
-    private int trySearchByTyping(String app, String query, boolean mayClickSearch) {
+    private int trySearchByTyping(String app, String query, boolean mayClickSearch,
+                                  boolean mayWalkMenu) {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) return TYPE_NOT_YET;
         try {
@@ -841,11 +867,15 @@ public class HijackService extends AccessibilityService {
                         button.recycle();
                     }
                 }
-                // No labelled Search anywhere. Many TV apps (Nuvio and other Compose / Leanback
-                // apps) keep a collapsed side menu of bare icons that only shows its labels
-                // once it has focus. Focus it once and look for the label again next round:
-                // this finds Search by its NAME, so a reordered or redesigned menu still works.
-                if (focusSideMenu(root)) return TYPE_REVEALED_MENU;
+            }
+            if (mayWalkMenu) {
+                // No search box and nothing labelled Search. Many TV apps (Nuvio and other
+                // Compose / Leanback apps) have a side menu of bare icons, and some (Nuvio)
+                // refuse accessibility focus, so the menu cannot be expanded to read its
+                // labels. Click its items from the top, one per round, until a search box
+                // shows up: independent of labels, language and menu order.
+                if (clickNextSideMenuItem(root)) return TYPE_REVEALED_MENU;
+                return TYPE_GAVE_UP; // every item tried (or no side menu at all)
             }
             return TYPE_NOT_YET;
         } catch (Exception e) {
@@ -901,79 +931,60 @@ public class HijackService extends AccessibilityService {
         return false;
     }
 
+    /** Index of the next side-menu item to try in the current voice search. */
+    private int sideMenuNext = 0;
+
     /**
-     * Gives focus to the first focusable element in the strip along the left edge, where
-     * TV apps put their side menu; a collapsed menu expands and shows its labels. Returns
-     * false when the app has nothing there.
+     * Clicks the next item of the app's left-edge side menu (items sorted top to bottom).
+     * Returns false once every item has been tried, or when the app has no side menu.
      */
-    private boolean focusSideMenu(AccessibilityNodeInfo root) {
+    private boolean clickNextSideMenuItem(AccessibilityNodeInfo root) {
         int maxRight = getResources().getDisplayMetrics().widthPixels / 8;
-        AccessibilityNodeInfo item = findLeftEdgeFocusable(root, 0, maxRight);
-        if (item == null) return false;
-        try {
-            boolean ok = item.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-            Log.i(TAG, "Voice search: opened the side menu to find Search, ok=" + ok);
-            return ok;
-        } finally {
-            item.recycle();
+        int maxHeight = getResources().getDisplayMetrics().heightPixels / 4;
+        java.util.List<AccessibilityNodeInfo> items = new java.util.ArrayList<AccessibilityNodeInfo>();
+        collectSideMenu(root, 0, maxRight, maxHeight, items);
+        java.util.Collections.sort(items, new java.util.Comparator<AccessibilityNodeInfo>() {
+            @Override public int compare(AccessibilityNodeInfo a, AccessibilityNodeInfo b) {
+                android.graphics.Rect ra = new android.graphics.Rect();
+                android.graphics.Rect rb = new android.graphics.Rect();
+                a.getBoundsInScreen(ra);
+                b.getBoundsInScreen(rb);
+                return ra.top - rb.top;
+            }
+        });
+        boolean clicked = false;
+        if (sideMenuNext < items.size()) {
+            clicked = items.get(sideMenuNext).performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            RingLog.i(TAG, "Voice search: side menu item " + (sideMenuNext + 1) + " of "
+                    + items.size() + " clicked=" + clicked);
+            sideMenuNext++;
         }
+        for (AccessibilityNodeInfo n : items) n.recycle();
+        return clicked;
     }
 
-    private static AccessibilityNodeInfo findLeftEdgeFocusable(AccessibilityNodeInfo node, int depth,
-                                                              int maxRight) {
-        if (node == null || depth > 30) return null;
-        if (node.isFocusable() && node.isVisibleToUser()) {
+    /** Clickable, item-sized elements in the strip along the left edge (a side menu). */
+    private static void collectSideMenu(AccessibilityNodeInfo node, int depth, int maxRight,
+                                        int maxHeight, java.util.List<AccessibilityNodeInfo> out) {
+        if (node == null || depth > 30) return;
+        if (node.isClickable() && node.isVisibleToUser()) {
             android.graphics.Rect b = new android.graphics.Rect();
             node.getBoundsInScreen(b);
-            if (b.right <= maxRight && b.height() > 40 && b.width() > 40) {
-                return AccessibilityNodeInfo.obtain(node);
+            // Item-sized only: the menu's own container also sits on the left edge.
+            if (b.right <= maxRight && b.height() > 40 && b.height() < maxHeight) {
+                out.add(AccessibilityNodeInfo.obtain(node));
+                return;
             }
         }
         for (int i = 0; i < node.getChildCount(); i++) {
             AccessibilityNodeInfo c = node.getChild(i);
             if (c == null) continue;
             try {
-                AccessibilityNodeInfo hit = findLeftEdgeFocusable(c, depth + 1, maxRight);
-                if (hit != null) return hit;
+                collectSideMenu(c, depth + 1, maxRight, maxHeight, out);
             } finally {
                 c.recycle();
             }
         }
-        return null;
-    }
-
-    /**
-     * Whether {@code app}, as it is on screen right now, offers something voice search can
-     * use: a search box, an element labelled Search, or a side menu that may reveal one.
-     * Read while the user holds the Alexa button, when the app is still visible under
-     * Alexa's listening bar, because once Alexa's results page is up the app is hidden
-     * and that page cannot be reopened by an app.
-     */
-    private boolean appLooksSearchable(String app) {
-        java.util.List<android.view.accessibility.AccessibilityWindowInfo> windows = getWindows();
-        if (windows == null) return false;
-        boolean found = false;
-        int maxRight = getResources().getDisplayMetrics().widthPixels / 8;
-        for (android.view.accessibility.AccessibilityWindowInfo w : windows) {
-            if (w == null) continue;
-            AccessibilityNodeInfo r = w.getRoot();
-            w.recycle();
-            if (r == null) continue;
-            try {
-                CharSequence pkg = r.getPackageName();
-                if (found || pkg == null || !app.equals(pkg.toString())) continue;
-                AccessibilityNodeInfo hit = findNode(r, 0, true);
-                if (hit == null) hit = findNode(r, 0, false);
-                if (hit == null) hit = findLeftEdgeFocusable(r, 0, maxRight);
-                if (hit != null) {
-                    found = true;
-                    hit.recycle();
-                }
-            } finally {
-                r.recycle();
-            }
-        }
-        return found;
     }
 
     private static boolean namesSearch(AccessibilityNodeInfo n) {
@@ -1010,8 +1021,15 @@ public class HijackService extends AccessibilityService {
      * the search there instead. Anything Alexa does NOT turn into this page (commands,
      * questions, smart-home) never gets here and is left alone.
      */
+    /** When the current voice flow started; Alexa's page re-reports itself meanwhile. */
+    private long voiceFlowAt = 0L;
+    private static final long VOICE_FLOW_GUARD_MS = 8_000L;
+
     private void handleAlexaSearchPage() {
         if (!prefs.isVoiceSearchToApp() || mainHandler == null) return;
+        if (voiceChoicePending || System.currentTimeMillis() - voiceFlowAt < VOICE_FLOW_GUARD_MS) {
+            return; // the same request, already being handled (or just decided)
+        }
         if (lastUserApp == null) {
             // Nothing tracked since the service started: fall back to the foreground
             // trackers, which still hold the app that was in front before Alexa.
@@ -1021,18 +1039,14 @@ public class HijackService extends AccessibilityService {
             }
         }
         final String app = lastUserApp;
-        Log.i(TAG, "Alexa search page up; app before it: " + app + " ("
+        RingLog.i(TAG, "Alexa search page up; app before it: " + app + " ("
                 + (System.currentTimeMillis() - lastUserAppAt) + "ms ago)");
         if (app == null || System.currentTimeMillis() - lastUserAppAt > VOICE_ORIGIN_MAX_AGE_MS) {
             return;
         }
         // The launcher is home: there is no "app you were in" to search.
         if (app.equals(prefs.getTargetPackage())) return;
-        if (!canSearchIn(app)) {
-            Log.i(TAG, "Voice search: " + app + " has no usable search, keeping Alexa's results");
-            showNoSearchNotice(app);
-            return;
-        }
+        voiceFlowAt = System.currentTimeMillis();
         final int token = ++voiceReadToken;
         // Cover Alexa's page right away with the decision panel: it hides the page and,
         // later, the switch to the app, and gives the user a moment to keep Alexa's
@@ -1052,7 +1066,7 @@ public class HijackService extends AccessibilityService {
                     String query = readAlexaQuery();
                     if (query == null) {
                         if (delay == VOICE_READ_DELAYS_MS[VOICE_READ_DELAYS_MS.length - 1]) {
-                            Log.i(TAG, "Voice search: no spoken text found on Alexa's page");
+                            RingLog.i(TAG, "Voice search: no spoken text found on Alexa's page");
                             hideVoicePanel();
                         }
                         return;
@@ -1065,24 +1079,79 @@ public class HijackService extends AccessibilityService {
         }
     }
 
-    private String voiceProbeApp;
-    private long voiceProbeAt;
-    private boolean voiceProbeSearchable;
-    /** How long a probe taken while Alexa listened still describes the app. */
-    private static final long VOICE_PROBE_MAX_AGE_MS = 30_000L;
+    /** Our own GLOBAL_ACTION_BACK, which must pass through untouched. */
+    private volatile long selfBackUntil = 0L;
+    /** App whose Back is being held, while the hold timer runs; null otherwise. */
+    private String backHoldApp = null;
+    private boolean backHoldFired = false;
+    private Runnable backHoldRunnable = null;
+    private static final long BACK_HOLD_MS = 700L;
 
     /**
-     * Whether a voice search can be handed to {@code app}: a search link or intent always
-     * can; otherwise the app must not have failed before and, when a probe was taken while
-     * Alexa listened, must have shown something searchable.
+     * Hold Back to leave an app: a Back held for {@link #BACK_HOLD_MS} goes to the
+     * launcher and stops the app in the background; a short press is passed on as a
+     * normal Back. Only inside ordinary apps: not on the launcher, Amazon's own screens
+     * or this app. Returns true when the event was taken.
      */
-    private boolean canSearchIn(String app) {
-        if (searchIntentFor(app, "x") != null) return true;
-        if (prefs.isVoiceSearchFailed(app)) return false;
-        if (app.equals(voiceProbeApp) && System.currentTimeMillis() - voiceProbeAt < VOICE_PROBE_MAX_AGE_MS) {
-            return voiceProbeSearchable;
+    private boolean handleBackHold(KeyEvent event) {
+        long now = System.currentTimeMillis();
+        if (now < selfBackUntil) return false; // the Back we re-sent ourselves
+        int action = event.getAction();
+        if (action == KeyEvent.ACTION_DOWN) {
+            if (event.getRepeatCount() > 0) return backHoldApp != null;
+            if (!prefs.isBackHoldExit() || mainHandler == null) return false;
+            final String fg = currentForegroundPackage();
+            if (fg == null || fg.equals(getPackageName()) || fg.equals(prefs.getTargetPackage())
+                    || isSystemDecorPkg(fg) || (fg.startsWith("com.amazon.") && !isLeanbackLaunchable(fg))) {
+                return false;
+            }
+            backHoldApp = fg;
+            backHoldFired = false;
+            backHoldRunnable = new Runnable() {
+                @Override public void run() {
+                    backHoldFired = true;
+                    exitApp(backHoldApp);
+                }
+            };
+            mainHandler.postDelayed(backHoldRunnable, BACK_HOLD_MS);
+            return true;
         }
-        return true; // unknown: try once
+        if (action == KeyEvent.ACTION_UP && backHoldApp != null) {
+            mainHandler.removeCallbacks(backHoldRunnable);
+            boolean fired = backHoldFired;
+            backHoldApp = null;
+            backHoldRunnable = null;
+            if (!fired) {
+                // A short press: hand the app its Back after all.
+                selfBackUntil = System.currentTimeMillis() + 600L;
+                performGlobalAction(GLOBAL_ACTION_BACK);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /** Leaves {@code app} for the launcher (or Amazon home) and stops it in the background. */
+    private void exitApp(final String app) {
+        String target = prefs.getTargetPackage();
+        boolean launched = target != null && !target.isEmpty() && prefs.isHijackEnabled()
+                && launchTarget(target, "Hold Back: leaving " + app, false);
+        if (!launched) {
+            ownHomeDispatchAt = System.currentTimeMillis();
+            performGlobalAction(GLOBAL_ACTION_HOME);
+        }
+        RingLog.i(TAG, "Hold Back: closed " + app);
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (app.equals(currentForegroundPkg)) return;
+                try {
+                    ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE))
+                            .killBackgroundProcesses(app);
+                } catch (Exception ignored) {
+                    // best effort
+                }
+            }
+        }, 1_500L);
     }
 
     /** How long the decision panel waits before searching in the app. */
@@ -1178,58 +1247,23 @@ public class HijackService extends AccessibilityService {
             // The black cover takes over from the panel until the app has painted.
             showButtonCover(voiceApp);
             hideVoicePanel();
-            runVoiceHandoff(voiceApp, voiceQuery);
+            // Close Alexa's results page first (Back on it returns to the app it opened
+            // over), so Back from the app later never lands on Alexa's page again.
+            selfBackUntil = System.currentTimeMillis() + 600L;
+            performGlobalAction(GLOBAL_ACTION_BACK);
+            final String app = voiceApp;
+            final String query = voiceQuery;
+            mainHandler.postDelayed(new Runnable() {
+                @Override public void run() { runVoiceHandoff(app, query); }
+            }, 250L);
         } else {
             voiceReadToken++; // stop any read still pending
             setIncludeHiddenViews(false);
             hideVoicePanel();
-            Log.i(TAG, "Voice search: kept Alexa's results");
+            RingLog.i(TAG, "Voice search: kept Alexa's results");
         }
         voiceApp = null;
         voiceQuery = null;
-    }
-
-    /** Short notice on top of Alexa's results: why they stay. Gone after 3 s or any key. */
-    private android.view.View noSearchNotice;
-    private void showNoSearchNotice(String app) {
-        if (windowManager == null || mainHandler == null) return;
-        hideNoSearchNotice();
-        float d = getResources().getDisplayMetrics().density;
-        android.widget.TextView t = new android.widget.TextView(this);
-        t.setText(getString(R.string.voice_no_search_notice, appName(app)));
-        t.setTextColor(0xFFFFFFFF);
-        t.setTextSize(18);
-        t.setPadding((int) (24 * d), (int) (14 * d), (int) (24 * d), (int) (14 * d));
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
-        bg.setColor(0xF00F172A);
-        bg.setStroke((int) (2 * d), 0xFFF59E0B);
-        bg.setCornerRadius(14 * d);
-        t.setBackground(bg);
-        WindowManager.LayoutParams lp = maskLayoutParams();
-        lp.width = WindowManager.LayoutParams.WRAP_CONTENT;
-        lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
-        lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
-        lp.y = (int) (48 * d);
-        try {
-            windowManager.addView(t, lp);
-            noSearchNotice = t;
-            mainHandler.postDelayed(new Runnable() {
-                @Override public void run() { hideNoSearchNotice(); }
-            }, 3_500L);
-        } catch (Exception e) {
-            Log.w(TAG, "Could not show the notice: " + e);
-        }
-    }
-
-    private void hideNoSearchNotice() {
-        if (noSearchNotice != null) {
-            try {
-                if (windowManager != null) windowManager.removeView(noSearchNotice);
-            } catch (Exception ignored) {
-                // already gone
-            }
-            noSearchNotice = null;
-        }
     }
 
     private void hideVoicePanel() {
@@ -1274,7 +1308,7 @@ public class HijackService extends AccessibilityService {
         showButtonCover(app);
         try {
             startActivity(search);
-            Log.i(TAG, "Voice search sent to " + app);
+            RingLog.i(TAG, "Voice search sent to " + app);
         } catch (Exception e) {
             hideButtonCover();
             Log.w(TAG, "Voice search to " + app + " failed: " + e);
@@ -1332,7 +1366,7 @@ public class HijackService extends AccessibilityService {
             }
         }
         String query = scan.byId != null ? scan.byId : scan.topText;
-        if (prefs.isVerboseLogging()) Log.i(TAG, "Voice search read: windows=[" + scan.windows.toString().trim()
+        if (prefs.isVerboseLogging()) RingLog.i(TAG, "Voice search read: windows=[" + scan.windows.toString().trim()
                 + "] nodes=" + scan.nodes + " texts=" + scan.texts
                 + " searchIds=" + scan.searchIds
                 + " byId=" + (scan.byId != null) + " top=" + (scan.topText != null)
@@ -1406,7 +1440,7 @@ public class HijackService extends AccessibilityService {
     private void enterEscape(String why) {
         stayOnAmazonHome = true;
         stayOnAmazonSince = System.currentTimeMillis();
-        Log.i(TAG, "Staying on Amazon home until another app is opened (" + why + ")");
+        RingLog.i(TAG, "Staying on Amazon home until another app is opened (" + why + ")");
     }
 
     /**
@@ -1420,7 +1454,7 @@ public class HijackService extends AccessibilityService {
         if (pkg.equals(getPackageName()) || isSystemDecorPkg(pkg)) return;
         if (pkg.startsWith("com.amazon.") && !isLeanbackLaunchable(pkg)) return;
         stayOnAmazonHome = false;
-        Log.i(TAG, "Escape ended: " + pkg + " opened");
+        RingLog.i(TAG, "Escape ended: " + pkg + " opened");
     }
 
     /** Full-screen black overlay that hides a branded app while we redirect away from it. */
@@ -1727,13 +1761,6 @@ public class HijackService extends AccessibilityService {
         }
         maybeClearEscape(pkgStr, clsStr);
         trackUserApp(pkgStr, clsStr);
-        if (ALEXA_PKG.equals(pkgStr) && lastUserApp != null && prefs.isVoiceSearchToApp()) {
-            // Alexa's listening bar: the app is still on screen underneath. Note now
-            // whether it has a search we can drive.
-            voiceProbeApp = lastUserApp;
-            voiceProbeAt = System.currentTimeMillis();
-            voiceProbeSearchable = appLooksSearchable(lastUserApp);
-        }
         if (AMAZON_LAUNCHER.equals(pkgStr) && ALEXA_SEARCH_CLS.equals(clsStr)) {
             handleAlexaSearchPage();
         }
@@ -1749,7 +1776,7 @@ public class HijackService extends AccessibilityService {
         boolean inAmazonLauncher = AMAZON_LAUNCHER.equals(pkgStr);
 
         if (prefs.isVerboseLogging()) {
-            Log.i(TAG, "verbose win pkg=" + pkg + " cls=" + cls
+            RingLog.i(TAG, "verbose win pkg=" + pkg + " cls=" + cls
                     + " prev=" + previousForegroundPkg
                     + " prevCls=" + previousForegroundCls
                     + " amazonHome=" + isAmazonHome
@@ -1772,7 +1799,7 @@ public class HijackService extends AccessibilityService {
             // report tells us straight away when Amazon renames or reshapes it.
             if (AMAZON_APPS_GRID.equals(pkgStr) && !isAppsGridWindow(clsStr)
                     && prefs.isLaunchKeyEnabled() && prefs.isVerboseLogging()) {
-                Log.i(TAG, "Appstore screen ignored, not the Apps grid: " + clsStr);
+                RingLog.i(TAG, "Appstore screen ignored, not the Apps grid: " + clsStr);
             }
             // Remember the Apps grid whether or not a slot is bound to it, so the Amazon
             // home it hands over to can be told from a Home press in both cases.
@@ -1794,7 +1821,7 @@ public class HijackService extends AccessibilityService {
             boolean matchLaunch = windowMatches(pkgStr, clsStr, launchWin);
             boolean matchAmazon = !matchLaunch && windowMatches(pkgStr, clsStr, prefs.getAmazonWindow());
             if ((matchLaunch || matchAmazon) && prefs.isVerboseLogging()) {
-                Log.i(TAG, "window-match pkg=" + pkgStr + " cls=" + clsStr
+                RingLog.i(TAG, "window-match pkg=" + pkgStr + " cls=" + clsStr
                         + " mapEnabled=" + mapOn + " launch=" + matchLaunch
                         + " amazon=" + matchAmazon + " launchWin=" + launchWin);
             }
@@ -1807,7 +1834,7 @@ public class HijackService extends AccessibilityService {
                 // remote button: leave the app alone. Only the button is remapped.
                 if (!openedByButton(pkgStr, now) && !backingOutOf(pkgStr, mappedTo, now)) {
                     if (prefs.isVerboseLogging()) {
-                        Log.i(TAG, pkgStr + " opened directly, not by its button: left alone");
+                        RingLog.i(TAG, pkgStr + " opened directly, not by its button: left alone");
                     }
                 } else if (matchLaunch) {
                     handleWindowLaunch(pkgStr);
@@ -1891,7 +1918,7 @@ public class HijackService extends AccessibilityService {
         // permission, so no amount of detection can separate them from here.
         if (!prefs.isEscapeLongPress()) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Long-press panel ignored: long-press escape is off");
+                RingLog.i(TAG, "Long-press panel ignored: long-press escape is off");
             }
             return;
         }
@@ -1949,14 +1976,14 @@ public class HijackService extends AccessibilityService {
                 && !target.equals(prev);
         if (tileClickInAmazon) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "quicksettings.ui after recent OK in Amazon ("
+                RingLog.i(TAG, "quicksettings.ui after recent OK in Amazon ("
                         + (now - lastKeyTime) + "ms ago). Treating as tile click");
             }
             return;
         }
 
         if (prefs.isVerboseLogging()) {
-            Log.i(TAG, "QS long-press handler: prev=" + prev
+            RingLog.i(TAG, "QS long-press handler: prev=" + prev
                     + " (current=" + currentForegroundPkg
                     + " tracked=" + previousForegroundPkg
                     + ") target=" + target);
@@ -1975,7 +2002,7 @@ public class HijackService extends AccessibilityService {
         // opens the target from the kids home.
         if (KIDS_LAUNCHER.equals(prev)) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Long-press panel left alone: kids launcher underneath"
+                RingLog.i(TAG, "Long-press panel left alone: kids launcher underneath"
                         + " (profile switch would otherwise be unreachable)");
             }
             return;
@@ -2055,7 +2082,7 @@ public class HijackService extends AccessibilityService {
             // pkg is the window we actually WALKED, which is not always Amazon's: a
             // second arrival can land after our own redirect has already put the target
             // launcher in front, and then these counts describe that instead.
-            Log.i(TAG, "Amazon home arrival: section="
+            RingLog.i(TAG, "Amazon home arrival: section="
                     + sectionName(section)
                     + " appsSection=" + appsSection
                     + " appsHandover=" + appsHandover
@@ -2088,7 +2115,7 @@ public class HijackService extends AccessibilityService {
                 // Fire OS 7 keeps the mask armed while the relaunch sits in the app-switch
                 // lock; Fire OS 8 has no mask, so a short time window stands in for it.
                 if (prefs.isVerboseLogging()) {
-                    Log.i(TAG, "Amazon home appeared, relaunch of " + app + " still pending");
+                    RingLog.i(TAG, "Amazon home appeared, relaunch of " + app + " still pending");
                 }
                 return;
             } else if (pendingButtonRelaunches < BUTTON_MAX_RELAUNCHES) {
@@ -2108,7 +2135,7 @@ public class HijackService extends AccessibilityService {
                 // arrival count as a Home press instead of waiting out the window.
                 pendingButtonApp = null;
             } else {
-                Log.i(TAG, "Amazon home keeps covering " + app + ", leaving it");
+                RingLog.i(TAG, "Amazon home keeps covering " + app + ", leaving it");
                 pendingButtonApp = null;
             }
         }
@@ -2129,7 +2156,7 @@ public class HijackService extends AccessibilityService {
 
         if (stayOnAmazonHome) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Auto-hijack skipped: user escaped to Amazon home");
+                RingLog.i(TAG, "Auto-hijack skipped: user escaped to Amazon home");
             }
             return;
         }
@@ -2141,7 +2168,7 @@ public class HijackService extends AccessibilityService {
         // screen, not for Home, so leave them there.
         if (appsHandover) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Apps screen, not a Home press ("
+                RingLog.i(TAG, "Apps screen, not a Home press ("
                         + (appsSection ? "section markers, " : "")
                         + "grid " + (now - lastAppsGridAt) + "ms ago)");
             }
@@ -2153,7 +2180,7 @@ public class HijackService extends AccessibilityService {
         if (maskArmed && target.equals(maskTargetPkg)
                 && sinceMaskArmed() < MASK_HARD_TIMEOUT_MS) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Auto-hijack skipped: launch of " + target + " still pending");
+                RingLog.i(TAG, "Auto-hijack skipped: launch of " + target + " still pending");
             }
             return;
         }
@@ -2171,7 +2198,7 @@ public class HijackService extends AccessibilityService {
         if (prev != null && prev.startsWith("com.amazon.") && !isLeanbackLaunchable(prev)
                 && isRecentShellNavKey(now)) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Auto-hijack skipped: deliberate move inside the Amazon shell"
+                RingLog.i(TAG, "Auto-hijack skipped: deliberate move inside the Amazon shell"
                         + " (prev=" + prev + " key=" + lastKeyCode
                         + " " + (now - lastKeyTime) + "ms ago)");
             }
@@ -2197,7 +2224,7 @@ public class HijackService extends AccessibilityService {
             // (measured: 4.8 s after a Home press that had already been redirected). The
             // screen belongs to someone else, so there is nothing to redirect.
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Amazon home event while " + scan.pkg + " is in front, ignored");
+                RingLog.i(TAG, "Amazon home event while " + scan.pkg + " is in front, ignored");
             }
             return;
         }
@@ -2208,7 +2235,7 @@ public class HijackService extends AccessibilityService {
             if (!backSinceHijack && homePressSeq == hijackedForHomeSeq
                     && now - lastHijackAt < DOUBLE_PRESS_WINDOW_MS) {
                 if (prefs.isVerboseLogging()) {
-                    Log.i(TAG, "Auto-hijack skipped: repeat event of Home press #" + homePressSeq);
+                    RingLog.i(TAG, "Auto-hijack skipped: repeat event of Home press #" + homePressSeq);
                 }
                 return;
             }
@@ -2230,7 +2257,7 @@ public class HijackService extends AccessibilityService {
         if (!targetUpSinceHijack && !backSinceHijack
                 && now - lastHijackAt < DOUBLE_PRESS_WINDOW_MS) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Auto-hijack skipped: repeat event " + (now - lastHijackAt)
+                RingLog.i(TAG, "Auto-hijack skipped: repeat event " + (now - lastHijackAt)
                         + "ms after the redirect, target not up yet");
             }
             return;
@@ -2309,7 +2336,7 @@ public class HijackService extends AccessibilityService {
     private void handleWindowLaunch(final String brandedPkg) {
         String target = prefs.getTargetPackage();
         if (target == null || target.isEmpty() || target.equals(getPackageName())) {
-            if (prefs.isVerboseLogging()) Log.i(TAG, "windowLaunch skip: no/invalid target");
+            if (prefs.isVerboseLogging()) RingLog.i(TAG, "windowLaunch skip: no/invalid target");
             return;
         }
         handleWindowLaunch(brandedPkg, target, "Redirect from mapped app button");
@@ -2328,7 +2355,7 @@ public class HijackService extends AccessibilityService {
         long now = System.currentTimeMillis();
         if (now - lastHijackAt < HIJACK_DEBOUNCE_MS) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "windowLaunch skip: debounce " + (now - lastHijackAt) + "ms since last");
+                RingLog.i(TAG, "windowLaunch skip: debounce " + (now - lastHijackAt) + "ms since last");
             }
             return;
         }
@@ -2359,7 +2386,7 @@ public class HijackService extends AccessibilityService {
                 // No launcher to go to: Amazon home is the real home then. Leaving the
                 // user on the branded app they never asked for is the one wrong answer.
                 boolean ok = performGlobalAction(GLOBAL_ACTION_HOME);
-                Log.i(TAG, "Back out of " + appToLaunch + " onto " + brandedPkg
+                RingLog.i(TAG, "Back out of " + appToLaunch + " onto " + brandedPkg
                         + ", no target: GLOBAL_ACTION_HOME ok=" + ok);
             }
             return;
@@ -2431,7 +2458,7 @@ public class HijackService extends AccessibilityService {
                     android.app.ActivityManager am =
                             (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
                     am.killBackgroundProcesses(brandedPkg);
-                    Log.i(TAG, "Stopped " + brandedPkg + " in the background");
+                    RingLog.i(TAG, "Stopped " + brandedPkg + " in the background");
                 } catch (Exception e) {
                     Log.w(TAG, "Could not stop " + brandedPkg + ": " + e);
                 }
@@ -2500,7 +2527,7 @@ public class HijackService extends AccessibilityService {
         if (buttonCover == null) attachCover();
         if (buttonCover == null) return;
         buttonCover.setVisibility(android.view.View.VISIBLE);
-        if (prefs.isVerboseLogging()) Log.i(TAG, "Screen covered while " + forPkg + " starts");
+        if (prefs.isVerboseLogging()) RingLog.i(TAG, "Screen covered while " + forPkg + " starts");
         if (buttonCoverCap != null) mainHandler.removeCallbacks(buttonCoverCap);
         buttonCoverCap = new Runnable() {
             @Override public void run() { hideButtonCover(); }
@@ -2643,7 +2670,7 @@ public class HijackService extends AccessibilityService {
         enterEscape(reason);
         ownHomeDispatchAt = System.currentTimeMillis();
         boolean ok = performGlobalAction(GLOBAL_ACTION_HOME);
-        Log.i(TAG, reason + ". Dispatched GLOBAL_ACTION_HOME ok=" + ok);
+        RingLog.i(TAG, reason + ". Dispatched GLOBAL_ACTION_HOME ok=" + ok);
     }
 
     /**
@@ -2676,7 +2703,7 @@ public class HijackService extends AccessibilityService {
         if (prefs.isVerboseLogging()) {
             // Raw key trace incl. scan code: tells which remote buttons reach the
             // accessibility filter at all on a given Fire OS build.
-            Log.i(TAG, "key " + KeyEvent.keyCodeToString(keyCode) + " code=" + keyCode
+            RingLog.i(TAG, "key " + KeyEvent.keyCodeToString(keyCode) + " code=" + keyCode
                     + " scan=" + event.getScanCode()
                     + " action=" + event.getAction() + " repeat=" + event.getRepeatCount()
                     + " flags=0x" + Integer.toHexString(event.getFlags())
@@ -2719,7 +2746,7 @@ public class HijackService extends AccessibilityService {
         }
 
         if (prefs.isVerboseLogging() && isDown) {
-            Log.i(TAG, "verbose key code=" + keyCode
+            RingLog.i(TAG, "verbose key code=" + keyCode
                     + " amazonHome=" + onAmazonHomeActivity);
             logFocusedNode("key:" + keyCode);
         }
@@ -2731,6 +2758,9 @@ public class HijackService extends AccessibilityService {
             tryCaptureFromCurrentFocus();
         }
 
+        if (!isDown && keyCode == KeyEvent.KEYCODE_BACK && backHoldApp != null) {
+            return handleBackHold(event);
+        }
         if (!isDown) {
             // Swallow the UP that pairs with a DOWN we consumed, so the
             // app the hijack just foregrounded doesn't receive a torn
@@ -2788,6 +2818,8 @@ public class HijackService extends AccessibilityService {
             consumedDownKey = keyCode;
             return true;
         }
+
+        if (keyCode == KeyEvent.KEYCODE_BACK && handleBackHold(event)) return true;
 
         boolean consumed = tryBackOrCenterHijack(keyCode);
         // Arm the UP-swallow only for a consumed DOWN; clear otherwise so
@@ -2933,7 +2965,7 @@ public class HijackService extends AccessibilityService {
             if (pendingButtonApp != null && !pendingButtonApp.equals(target)) {
                 pendingButtonApp = null;
             }
-            Log.i(TAG, reasonForLog + ". Launched " + target);
+            RingLog.i(TAG, reasonForLog + ". Launched " + target);
             if (withMask) armMask(target);
             return true;
         } catch (Exception e) {
@@ -3236,10 +3268,10 @@ public class HijackService extends AccessibilityService {
         if (prefs == null || !prefs.isVerboseLogging()) return;
         SectionScan scan = scanActiveWindow(true);
         if (scan == null) {
-            Log.i(TAG, "Section probe: no active window");
+            RingLog.i(TAG, "Section probe: no active window");
             return;
         }
-        Log.i(TAG, "Section probe: pkg=" + scan.pkg
+        RingLog.i(TAG, "Section probe: pkg=" + scan.pkg
                 + " nodes=" + scan.nodes + " withViewId=" + scan.withViewId
                 + " section=" + sectionName(scan.section)
                 + " focus=" + shellFocus(scan)
@@ -3274,10 +3306,10 @@ public class HijackService extends AccessibilityService {
                 if (prefs == null || !prefs.isVerboseLogging()) return;
                 SectionScan scan = scanActiveWindow(true);
                 if (scan == null) {
-                    Log.i(TAG, "Amazon home settled: no active window");
+                    RingLog.i(TAG, "Amazon home settled: no active window");
                     return;
                 }
-                Log.i(TAG, "Amazon home settled: pkg=" + scan.pkg
+                RingLog.i(TAG, "Amazon home settled: pkg=" + scan.pkg
                         + " nodes=" + scan.nodes + " withViewId=" + scan.withViewId
                         + " section=" + sectionName(scan.section)
                         + " focus=" + shellFocus(scan)
@@ -3335,7 +3367,7 @@ public class HijackService extends AccessibilityService {
         }
         if (windowMatches(AMAZON_APPS_GRID, null, prefs.getAmazonWindow())) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Apps slot points at Amazon home, already there");
+                RingLog.i(TAG, "Apps slot points at Amazon home, already there");
             }
             return true;
         }
@@ -3367,7 +3399,7 @@ public class HijackService extends AccessibilityService {
         if (focusedId != null) {
             boolean home = isHomeTabViewId(focusedId);
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "Back/OK on Amazon home: focused " + focusedId
+                RingLog.i(TAG, "Back/OK on Amazon home: focused " + focusedId
                         + (home ? " is" : " is not") + " the Home tab");
             }
             return home;
@@ -3438,7 +3470,7 @@ public class HijackService extends AccessibilityService {
         AccessibilityNodeInfo src = event.getSource();
         if (src == null) {
             if (pendingHomeTabCapture && prefs.isVerboseLogging()) {
-                Log.i(TAG, "focus event in launcher: src=null");
+                RingLog.i(TAG, "focus event in launcher: src=null");
             }
             return;
         }
@@ -3448,7 +3480,7 @@ public class HijackService extends AccessibilityService {
             if (prefs.isVerboseLogging()) {
                 // Which node the launcher reports as focused, with its id. Shows whether the
                 // Apps screen's "For you" tab carries its id on the focus event itself.
-                Log.i(TAG, "launcher focus id=" + src.getViewIdResourceName()
+                RingLog.i(TAG, "launcher focus id=" + src.getViewIdResourceName()
                         + " bounds=" + b.flattenToString() + " dpad=" + wasDpadDriven
                         + " cached=" + (cachedHomeTabBounds == null
                                 ? "null" : cachedHomeTabBounds.flattenToString()));
@@ -3493,7 +3525,7 @@ public class HijackService extends AccessibilityService {
         // how the two are told apart.
         if (focusIsOnAppsScreen(viewId)) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "focus at the Home tab position is on the Apps screen (" + viewId
+                RingLog.i(TAG, "focus at the Home tab position is on the Apps screen (" + viewId
                         + ", grid " + (System.currentTimeMillis() - lastAppsGridAt)
                         + "ms ago), not a Home press");
             }
@@ -3501,7 +3533,7 @@ public class HijackService extends AccessibilityService {
         }
         if (!shouldInferHomePress(wasDpadDriven)) {
             if (prefs.isVerboseLogging()) {
-                Log.i(TAG, "focus on Home tab, but inference suppressed"
+                RingLog.i(TAG, "focus on Home tab, but inference suppressed"
                         + " (dpadDriven=" + wasDpadDriven + ")");
             }
             return;
@@ -3579,7 +3611,7 @@ public class HijackService extends AccessibilityService {
                                          String pathLabel) {
         boolean plausible = isPlausibleTabBounds(b);
         if (prefs.isVerboseLogging()) {
-            Log.i(TAG, pathLabel.replace(" path", "") + " capture attempt"
+            RingLog.i(TAG, pathLabel.replace(" path", "") + " capture attempt"
                     + " bounds=" + b.flattenToString()
                     + " cls=" + cls
                     + " plausible=" + plausible);
@@ -3587,7 +3619,7 @@ public class HijackService extends AccessibilityService {
         if (!plausible) return;
         cachedHomeTabBounds = new android.graphics.Rect(b);
         pendingHomeTabCapture = false;
-        Log.i(TAG, "Captured Home tab bounds (" + pathLabel + "): "
+        RingLog.i(TAG, "Captured Home tab bounds (" + pathLabel + "): "
                 + b.flattenToString());
     }
 
@@ -3710,7 +3742,6 @@ public class HijackService extends AccessibilityService {
         cancelMask();
         detachCover();
         hideVoicePanel();
-        hideNoSearchNotice();
         if (logWatcher != null) logWatcher.stop();
         if (screenOnReceiver != null) {
             try {
@@ -3776,7 +3807,7 @@ public class HijackService extends AccessibilityService {
             Intent intent = new Intent(this, MainActivity.class);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
-            Log.i(TAG, "Long-press Menu. Opened FireStick Fixer");
+            RingLog.i(TAG, "Long-press Menu. Opened FireStick Fixer");
         } catch (Exception e) {
             Log.e(TAG, "Failed to open self", e);
         }
@@ -3898,7 +3929,7 @@ public class HijackService extends AccessibilityService {
         if (maskArmed) {
             // Logs how long Fire OS held our launch back. Without it a
             // report only shows that the target came up eventually, not how late.
-            Log.i(TAG, "Target " + maskTargetPkg + " appeared " + sinceMaskArmed()
+            RingLog.i(TAG, "Target " + maskTargetPkg + " appeared " + sinceMaskArmed()
                     + "ms after the launch, cls=" + cls);
             maskArmed = false;
             if (maskGraceRunnable != null && mainHandler != null) {
@@ -3937,7 +3968,7 @@ public class HijackService extends AccessibilityService {
             public void run() {
                 maskTeardownCapRunnable = null;
                 if (maskTeardownPending) {
-                    Log.i(TAG, "Mask teardown cap reached, fading without a confirmed content window");
+                    RingLog.i(TAG, "Mask teardown cap reached, fading without a confirmed content window");
                     holdThenFadeMask();
                 }
             }
@@ -3979,7 +4010,7 @@ public class HijackService extends AccessibilityService {
             maskView = view;
             maskAttached = true;
             scheduleMaskTimeout();
-            Log.i(TAG, "Mask shown for deferred launch of " + maskTargetPkg);
+            RingLog.i(TAG, "Mask shown for deferred launch of " + maskTargetPkg);
         } catch (Exception e) {
             Log.e(TAG, "Failed to show mask", e);
             maskView = null;
@@ -4049,7 +4080,7 @@ public class HijackService extends AccessibilityService {
                 }
             };
             mainHandler.postDelayed(maskPrewarmRemove, MASK_PREWARM_MS);
-            Log.i(TAG, "Mask path prewarmed");
+            RingLog.i(TAG, "Mask path prewarmed");
         } catch (Exception e) {
             Log.e(TAG, "Mask prewarm failed", e);
             maskPrewarmView = null;
@@ -4196,7 +4227,7 @@ public class HijackService extends AccessibilityService {
                 if (maskAttached) {
                     // With the state appended, a single log tells a launch that was only
                     // slow from one that never arrived, and names what took the screen.
-                    Log.i(TAG, logMsg + " (foreground=" + currentForegroundPkg
+                    RingLog.i(TAG, logMsg + " (foreground=" + currentForegroundPkg
                             + ", " + sinceMaskArmed() + "ms since the launch)");
                     removeMask();
                 }
@@ -4208,6 +4239,13 @@ public class HijackService extends AccessibilityService {
     /** Milliseconds since the launch this mask belongs to, or -1 if none is on record. */
     private long sinceMaskArmed() {
         return maskArmedAt > 0L ? System.currentTimeMillis() - maskArmedAt : -1L;
+    }
+
+    /** adb shell dumpsys activity service io.github.hatim.firestickfixer/.HijackService */
+    @Override
+    protected void dump(java.io.FileDescriptor fd, java.io.PrintWriter pw, String[] args) {
+        pw.println("FireStick Fixer, recent service log:");
+        RingLog.dump(pw);
     }
 
     @Override
@@ -4228,21 +4266,21 @@ public class HijackService extends AccessibilityService {
     private void logFocusedNode(String context) {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (root == null) {
-            Log.i(TAG, "verbose node " + context + " root=null");
+            RingLog.i(TAG, "verbose node " + context + " root=null");
             return;
         }
         try {
             AccessibilityNodeInfo focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
             if (focused == null) focused = root.findFocus(AccessibilityNodeInfo.FOCUS_ACCESSIBILITY);
             if (focused == null) {
-                Log.i(TAG, "verbose node " + context + " pkg=" + root.getPackageName()
+                RingLog.i(TAG, "verbose node " + context + " pkg=" + root.getPackageName()
                         + " focused=null");
                 return;
             }
             try {
                 android.graphics.Rect b = new android.graphics.Rect();
                 focused.getBoundsInScreen(b);
-                Log.i(TAG, "verbose node " + context
+                RingLog.i(TAG, "verbose node " + context
                         + " pkg=" + focused.getPackageName()
                         + " id=" + focused.getViewIdResourceName()
                         + " cls=" + focused.getClassName()

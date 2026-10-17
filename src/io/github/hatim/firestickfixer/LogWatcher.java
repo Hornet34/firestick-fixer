@@ -149,6 +149,25 @@ final class LogWatcher {
             return;
         }
 
+        // Some buttons (Netflix, measured on Fire OS 8.1.8.5) skip the venezia hop: the
+        // system starts the app's main screen itself, with extras and no button tag.
+        // Only the system (uid 1000) starts apps that way; launchers, Amazon home and
+        // Alexa each start them under their own uid, so a manual open never matches.
+        if (pendingButton == null && "1000".equals(uid)
+                && intent.contains("act=android.intent.action.MAIN")
+                && intent.contains("LAUNCHER]") && intent.contains("(has extras)")) {
+            Matcher p = PKG.matcher(intent);
+            if (p.find()) {
+                final String app = p.group(1);
+                if (!app.startsWith("com.amazon.tv.") && !app.equals("com.amazon.venezia")) {
+                    main.post(new Runnable() {
+                        @Override public void run() { listener.onButtonLaunch("direct", app, now); }
+                    });
+                    return;
+                }
+            }
+        }
+
         if (pendingButton != null && "1000".equals(uid)
                 && now - pendingButtonAt < BUTTON_TO_APP_MS) {
             Matcher p = PKG.matcher(intent);

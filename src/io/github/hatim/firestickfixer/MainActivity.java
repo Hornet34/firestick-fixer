@@ -52,7 +52,7 @@ public class MainActivity extends Activity {
     /** Round launch button on the right of the target row. */
     private TextView launchBtn;
     private Switch accessSwitch, hijackSwitch, bootSwitch, verboseSwitch, menuLpSwitch,
-            launchKeyEnabledSwitch, backStaySwitch, voiceSwitch;
+            launchKeyEnabledSwitch, backStaySwitch, voiceSwitch, backHoldSwitch;
     /** "Finish setting up" card, shown until both adb grants and the service are in place. */
     private TextView setupBanner;
     /** Status row for the optional READ_LOGS grant, and its right-hand status text. */
@@ -533,6 +533,13 @@ public class MainActivity extends Activity {
                 prefs.isBackStaysOnLauncher(),
                 prefToggle(new PrefSetter() {
                     @Override public void set(boolean v) { prefs.setBackStaysOnLauncher(v); }
+                }));
+        backHoldSwitch = makeSwitchRow(home,
+                titled(getString(R.string.switch_back_hold), R.string.desc_back_hold),
+                getString(R.string.switch_back_hold_tip),
+                prefs.isBackHoldExit(),
+                prefToggle(new PrefSetter() {
+                    @Override public void set(boolean v) { prefs.setBackHoldExit(v); }
                 }));
 
         LinearLayout buttons = addCard(content, getString(R.string.section_buttons));
@@ -2457,7 +2464,8 @@ public class MainActivity extends Activity {
         // which lets a value box or an escape switch one line further down beat the row
         // directly underneath. The right-hand controls stay reachable via RIGHT.
         View voiceRow = rowOf(voiceSwitch);
-        View[] column = {initialFocus, accessRow, hijackRow, backRow, launchKeyRow, voiceRow,
+        View holdRow = rowOf(backHoldSwitch);
+        View[] column = {initialFocus, accessRow, hijackRow, backRow, holdRow, launchKeyRow, voiceRow,
                 preciseRow, bootRow, verboseRow};
         for (View v : column) {
             ensureId(v);
@@ -2482,7 +2490,7 @@ public class MainActivity extends Activity {
         }
         for (TextView box : new TextView[]{launcherBox, amazonBox, customBox}) {
             if (box == null) continue;
-            if (backRow != null) box.setNextFocusUpId(backRow.getId());
+            if (holdRow != null) box.setNextFocusUpId(holdRow.getId());
             if (voiceRow != null) box.setNextFocusDownId(voiceRow.getId());
         }
         // Fire OS 7 loading-cover box on the Replace-Home row: the accessibility row is
@@ -2913,6 +2921,7 @@ public class MainActivity extends Activity {
             verboseSwitch.setChecked(prefs.isVerboseLogging());
             backStaySwitch.setChecked(prefs.isBackStaysOnLauncher());
             voiceSwitch.setChecked(prefs.isVoiceSearchToApp());
+            backHoldSwitch.setChecked(prefs.isBackHoldExit());
             launchKeyEnabledSwitch.setChecked(prefs.isLaunchKeyEnabled());
         } finally {
             suppressSwitchEvents = false;
@@ -2950,6 +2959,7 @@ public class MainActivity extends Activity {
         setRowEnabled(verboseSwitch, accessOn);
         setRowEnabled(backStaySwitch, accessOn);
         setRowEnabled(voiceSwitch, accessOn);
+        setRowEnabled(backHoldSwitch, accessOn);
         updateBootBoxState();
         setRowEnabled(launchKeyEnabledSwitch, accessOn);
         // The value box is gated on both the service AND the shortcut toggle.
