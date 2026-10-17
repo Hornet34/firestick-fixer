@@ -100,7 +100,10 @@ final class LogWatcher {
             try {
                 // -T 1: only lines from now on. Only ActivityTaskManager, at Info, which
                 // is all we parse, keeps the pipe quiet.
-                proc = new ProcessBuilder("logcat", "-b", "system,main", "-v", "brief",
+                // The system buffer only: measured on Fire OS 8.1.8.5, every
+                // ActivityTaskManager START line lands there and none in main, which
+                // would only double the lines logcat has to read past.
+                proc = new ProcessBuilder("logcat", "-b", "system", "-v", "brief",
                         "-T", "1", "ActivityTaskManager:I", "*:S")
                         .redirectErrorStream(true).start();
                 BufferedReader r = new BufferedReader(

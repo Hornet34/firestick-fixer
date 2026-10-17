@@ -166,10 +166,19 @@
     <string name="precise_on">Active</string>
     <string name="precise_off">Off · one-time setup</string>
     <string name="precise_tip_on">Active. FireStick Fixer sees every ⌂ Home press and every remote app button the moment the system handles it: Home goes straight to your launcher with no Amazon flash, double-tap is exact, and a remapped app button only fires for the button, not when you open that app yourself.</string>
-    <string name="precise_tip_off">Run once from a computer (survives reboots, read-only):\nadb shell pm grant io.github.hatim.firestickfixer android.permission.READ_LOGS\nThen switch the accessibility service off and on. Without it, FireStick Fixer falls back to slower window detection, and Amazon home can flash briefly on ⌂ Home.</string>
+    <string name="precise_tip_off">Run once from a computer (survives reboots, read-only):\nadb shell pm grant io.github.hatim.firestickfixer android.permission.READ_LOGS\nIt takes effect by itself within half a minute. Without it, FireStick Fixer falls back to slower window detection, and Amazon home can flash briefly on ⌂ Home.</string>
     <string name="precise_toast">Run once via adb:\nadb shell pm grant io.github.hatim.firestickfixer android.permission.READ_LOGS</string>
     <string name="boot_app_label">App:</string>
     <string name="boot_app_same">My launcher</string>
     <string name="boot_app_pick_title">App to open at start-up</string>
     <string name="boot_app_tip">Which app opens at start-up. Pick your launcher to follow it, or any other app (for example a live TV or streaming app).</string>
+    <string name="switch_voice_search">Alexa voice search goes to the app I\'m in</string>
+    <string name="switch_voice_search_tip">Hold the Alexa button inside an app and speak: instead of Alexa\'s own results page, the app you were in searches for what you said. Speak from your launcher or the Amazon home screen to get Alexa\'s own results instead. Alexa commands and questions are not affected.</string>
+    <string name="setup_title">Finish setting up</string>
+    <string name="setup_intro">Run these once from a computer with adb (they survive reboots and updates):</string>
+    <string name="setup_wss">Required · lets the switch below turn the service on</string>
+    <string name="setup_logs">Recommended · instant ⌂ Home, exact double-tap, button-only remapping</string>
+    <string name="setup_service">Switch on "Accessibility service" below.</string>
+    <string name="setup_logs_restart">Takes effect by itself within half a minute.</string>
+    <string name="voice_no_search_box">FireStick Fixer: couldn\'t find a search box in %1$s</string>
 </resources>

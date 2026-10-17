@@ -216,6 +216,43 @@ public class Prefs {
         sp.edit().putString(KEY_BOOT_APP, pkg == null ? "" : pkg).apply();
     }
 
+    private static final String KEY_VOICE_SEARCH = "voice_search_to_app";
+    private static final String KEY_LOG_HOME_BUILD = "log_home_seen_build";
+    private static final String KEY_LOG_BUTTON_BUILD = "log_button_seen_build";
+
+    /**
+     * When Alexa answers a voice request inside an app with its own search page, send
+     * the spoken words to that app's search instead.
+     */
+    public boolean isVoiceSearchToApp() {
+        return sp.getBoolean(KEY_VOICE_SEARCH, true);
+    }
+
+    public void setVoiceSearchToApp(boolean enabled) {
+        sp.edit().putBoolean(KEY_VOICE_SEARCH, enabled).apply();
+    }
+
+    /**
+     * Fire OS build on which a Home press was last actually seen in the system log, so
+     * precise mode is trusted from boot on that build and re-verified after an update.
+     */
+    public String getLogHomeSeenBuild() {
+        return sp.getString(KEY_LOG_HOME_BUILD, "");
+    }
+
+    public void setLogHomeSeenBuild(String build) {
+        sp.edit().putString(KEY_LOG_HOME_BUILD, build).apply();
+    }
+
+    /** Same as {@link #getLogHomeSeenBuild} for remote app-button lines. */
+    public String getLogButtonSeenBuild() {
+        return sp.getString(KEY_LOG_BUTTON_BUILD, "");
+    }
+
+    public void setLogButtonSeenBuild(String build) {
+        sp.edit().putString(KEY_LOG_BUTTON_BUILD, build).apply();
+    }
+
     private static final String KEY_BACK_STAYS = "back_stays_on_launcher";
 
     /**

@@ -52,7 +52,9 @@ public class MainActivity extends Activity {
     /** Round launch button on the right of the target row. */
     private TextView launchBtn;
     private Switch accessSwitch, hijackSwitch, bootSwitch, verboseSwitch, menuLpSwitch,
-            launchKeyEnabledSwitch, backStaySwitch;
+            launchKeyEnabledSwitch, backStaySwitch, voiceSwitch;
+    /** "Finish setting up" card, shown until both adb grants and the service are in place. */
+    private TextView setupBanner;
     /** Status row for the optional READ_LOGS grant, and its right-hand status text. */
     private LinearLayout preciseRow;
     private TextView preciseStatus;
@@ -233,6 +235,8 @@ public class MainActivity extends Activity {
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(32), dp(8), dp(32), dp(24));
 
+        setupBanner = buildSetupBanner();
+        content.addView(setupBanner);
         content.addView(sectionHeading(getString(R.string.section_launcher)));
         content.addView(buildTargetRow(), targetRowLp());
         addSwitches(content);
@@ -521,6 +525,13 @@ public class MainActivity extends Activity {
         // The custom-button mapping also covers app-buttons like YouTube, ⊞ Apps and
         // Live TV (learned as screen redirects).
         addLaunchKeyRow(buttons);
+        voiceSwitch = makeSwitchRow(buttons,
+                getString(R.string.switch_voice_search),
+                getString(R.string.switch_voice_search_tip),
+                prefs.isVoiceSearchToApp(),
+                prefToggle(new PrefSetter() {
+                    @Override public void set(boolean v) { prefs.setVoiceSearchToApp(v); }
+                }));
         addPreciseRow(buttons);
 
         LinearLayout startup = addCard(content, getString(R.string.section_startup));
@@ -660,6 +671,83 @@ public class MainActivity extends Activity {
         });
         preciseRow = row;
         card.addView(row);
+    }
+
+    /** Amber-outlined card at the top that lists what setup is still missing. */
+    private TextView buildSetupBanner() {
+        TextView t = new TextView(this);
+        t.setTextSize(16);
+        t.setTextColor(Colors.NEUTRAL);
+        t.setLineSpacing(0f, 1.15f);
+        t.setPadding(dp(20), dp(14), dp(20), dp(14));
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(0xFF1F1A0E);
+        bg.setStroke(dp(2), Colors.AMBER);
+        bg.setCornerRadius(dp(14));
+        t.setBackground(bg);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.topMargin = dp(12);
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    /**
+     * Re-checks both one-time adb grants and the service on every refresh (so on every
+     * return to this screen) and lists whatever is still missing, with the exact command.
+     * Hidden once everything is in place.
+     */
+    private void refreshSetupBanner() {
+        if (setupBanner == null) return;
+        boolean wss = checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS)
+                == PackageManager.PERMISSION_GRANTED;
+        boolean logs = LogWatcher.isAvailable(this);
+        boolean service = AccessibilityHelper.isOurServiceEnabled(this);
+        if (wss && logs && service) {
+            setupBanner.setVisibility(View.GONE);
+            return;
+        }
+        android.text.SpannableStringBuilder b = new android.text.SpannableStringBuilder();
+        appendStyled(b, "⚠  " + getString(R.string.setup_title) + "\n", Colors.AMBER, true, false);
+        if (!wss || !logs) {
+            appendStyled(b, getString(R.string.setup_intro) + "\n", Colors.NEUTRAL, false, false);
+        }
+        if (!wss) {
+            appendStyled(b, "✗ " + getString(R.string.setup_wss) + "\n", Colors.WHITE, true, false);
+            appendStyled(b, "   adb shell pm grant " + getPackageName()
+                    + " android.permission.WRITE_SECURE_SETTINGS\n", Colors.BRAND, false, true);
+        }
+        if (!logs) {
+            appendStyled(b, "✗ " + getString(R.string.setup_logs) + "\n", Colors.WHITE, true, false);
+            appendStyled(b, "   adb shell pm grant " + getPackageName()
+                    + " android.permission.READ_LOGS\n", Colors.BRAND, false, true);
+            appendStyled(b, "   " + getString(R.string.setup_logs_restart) + "\n",
+                    Colors.DIM, false, false);
+        }
+        if (!service) {
+            appendStyled(b, "✗ " + getString(R.string.setup_service) + "\n", Colors.WHITE, true, false);
+        }
+        // Drop the trailing newline.
+        if (b.length() > 0 && b.charAt(b.length() - 1) == '\n') b.delete(b.length() - 1, b.length());
+        setupBanner.setText(badgeKeys(b));
+        setupBanner.setVisibility(View.VISIBLE);
+    }
+
+    private static void appendStyled(android.text.SpannableStringBuilder b, String text, int color,
+                                     boolean bold, boolean mono) {
+        int start = b.length();
+        b.append(text);
+        int end = b.length();
+        b.setSpan(new android.text.style.ForegroundColorSpan(color), start, end,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        if (bold) {
+            b.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), start, end,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        if (mono) {
+            b.setSpan(new android.text.style.TypefaceSpan("monospace"), start, end,
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
     }
 
     private void refreshPreciseRow() {
@@ -2354,8 +2442,9 @@ public class MainActivity extends Activity {
         // control below inside its beam and then picks purely by weighted distance,
         // which lets a value box or an escape switch one line further down beat the row
         // directly underneath. The right-hand controls stay reachable via RIGHT.
-        View[] column = {initialFocus, accessRow, hijackRow, backRow, launchKeyRow, preciseRow,
-                bootRow, verboseRow};
+        View voiceRow = rowOf(voiceSwitch);
+        View[] column = {initialFocus, accessRow, hijackRow, backRow, launchKeyRow, voiceRow,
+                preciseRow, bootRow, verboseRow};
         for (View v : column) {
             ensureId(v);
         }
@@ -2380,7 +2469,7 @@ public class MainActivity extends Activity {
         for (TextView box : new TextView[]{launcherBox, amazonBox, customBox}) {
             if (box == null) continue;
             if (backRow != null) box.setNextFocusUpId(backRow.getId());
-            if (preciseRow != null) box.setNextFocusDownId(preciseRow.getId());
+            if (voiceRow != null) box.setNextFocusDownId(voiceRow.getId());
         }
         // Fire OS 7 loading-cover box on the Replace-Home row: the accessibility row is
         // above, the map-custom-buttons row below; reach it via RIGHT, leave via UP/DOWN.
@@ -2745,6 +2834,7 @@ public class MainActivity extends Activity {
         updateCustomBox(); // an app behind a mapping may have been installed or removed
         refreshBootBox();
         refreshPreciseRow();
+        refreshSetupBanner();
     }
 
     /**
@@ -2808,6 +2898,7 @@ public class MainActivity extends Activity {
             bootSwitch.setChecked(prefs.getLaunchOnBoot());
             verboseSwitch.setChecked(prefs.isVerboseLogging());
             backStaySwitch.setChecked(prefs.isBackStaysOnLauncher());
+            voiceSwitch.setChecked(prefs.isVoiceSearchToApp());
             launchKeyEnabledSwitch.setChecked(prefs.isLaunchKeyEnabled());
         } finally {
             suppressSwitchEvents = false;
@@ -2844,6 +2935,7 @@ public class MainActivity extends Activity {
         setRowEnabled(bootSwitch, accessOn);
         setRowEnabled(verboseSwitch, accessOn);
         setRowEnabled(backStaySwitch, accessOn);
+        setRowEnabled(voiceSwitch, accessOn);
         updateBootBoxState();
         setRowEnabled(launchKeyEnabledSwitch, accessOn);
         // The value box is gated on both the service AND the shortcut toggle.

@@ -268,6 +268,9 @@ public class HijackService extends AccessibilityService {
                 CharSequence pkg = root.getPackageName();
                 if (pkg != null) {
                     currentForegroundPkg = pkg.toString();
+                    // The app on screen when the service (re)starts is the one a voice
+                    // search belongs to until another app comes up.
+                    trackUserApp(currentForegroundPkg, "seed");
                 }
             } finally {
                 root.recycle();
@@ -277,6 +280,7 @@ public class HijackService extends AccessibilityService {
         attachCover();
         logWatcher = new LogWatcher(this, mainHandler, logListener);
         logWatcher.start();
+        if (!logWatcher.isRunning()) scheduleLogGrantCheck();
         maybeLaunchAtBoot();
         // Delayed so whatever is on screen has finished building its tree.
         mainHandler.postDelayed(new Runnable() {
@@ -451,6 +455,24 @@ public class HijackService extends AccessibilityService {
     private Runnable rootSignatureCapture = null;
     private static final long ROOT_SIGNATURE_DELAY_MS = 1_200L;
 
+    /**
+     * Alexa's search page. When Alexa does not hand a voice request to the app in front
+     * (only apps built with Amazon's Alexa integration get it), it opens this page in
+     * Amazon's launcher with the spoken words as its first line.
+     */
+    private static final String ALEXA_SEARCH_CLS =
+            "com.amazon.tv.launcher.deeplink.activity.DirectiveSearchResultsActivityDI";
+    private static final String ALEXA_SEARCH_TEXT_ID = "com.amazon.tv.launcher:id/search_text";
+    private static final String ALEXA_PKG = "com.amazon.vizzini";
+    /** The last ordinary app the user had in front, and when: the app a voice search belongs to. */
+    private volatile String lastUserApp = null;
+    private volatile long lastUserAppAt = 0L;
+    /** A voice request this old is no longer about the app that was in front. */
+    private static final long VOICE_ORIGIN_MAX_AGE_MS = 60_000L;
+    /** The search page builds its text a moment after its window appears; look a few times. */
+    private static final long[] VOICE_READ_DELAYS_MS = {0L, 200L, 500L, 1000L, 1600L, 2500L, 4000L};
+    private int voiceReadToken = 0;
+
     /** When the target launcher last reported real content in front. */
     private volatile long targetShownAt = 0L;
     private volatile long stayOnAmazonSince = 0L;
@@ -465,8 +487,40 @@ public class HijackService extends AccessibilityService {
         }
     };
 
+    /**
+     * Precise Home handling: the watcher runs AND its Home lines have been seen on this
+     * Fire OS build. Without that proof a changed log format after an update would leave
+     * us waiting for lines that never come, with the window-based double-press switched
+     * off; until a Home line shows up the window heuristics stay in charge.
+     */
+    /**
+     * READ_LOGS can be granted while the service runs. Look for it every 30 s until it
+     * shows up, so the user does not have to restart the service; one permission check
+     * per half minute, and none at all once the watcher runs.
+     */
+    private void scheduleLogGrantCheck() {
+        if (mainHandler == null) return;
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (logWatcher == null || logWatcher.isRunning()) return;
+                if (LogWatcher.isAvailable(HijackService.this)) {
+                    logWatcher.start();
+                } else {
+                    scheduleLogGrantCheck();
+                }
+            }
+        }, 30_000L);
+    }
+
     private boolean preciseMode() {
-        return logWatcher != null && logWatcher.isRunning();
+        return logWatcher != null && logWatcher.isRunning()
+                && Build.DISPLAY.equals(prefs.getLogHomeSeenBuild());
+    }
+
+    /** Same proof for remote app-button lines, which gate button-only remapping. */
+    private boolean preciseButtons() {
+        return logWatcher != null && logWatcher.isRunning()
+                && Build.DISPLAY.equals(prefs.getLogButtonSeenBuild());
     }
 
     /**
@@ -476,6 +530,10 @@ public class HijackService extends AccessibilityService {
      */
     private void handleHomePressFromLog(long at) {
         if (at - ownHomeDispatchAt < 800L) return; // our own GLOBAL_ACTION_HOME
+        if (!Build.DISPLAY.equals(prefs.getLogHomeSeenBuild())) {
+            prefs.setLogHomeSeenBuild(Build.DISPLAY);
+            Log.i(TAG, "Home presses visible in the system log on " + Build.DISPLAY);
+        }
         prevHomePressAt = lastHomePressAt;
         lastHomePressAt = at;
         homePressSeq++;
@@ -529,6 +587,9 @@ public class HijackService extends AccessibilityService {
     private void handleButtonFromLog(String button, String pkg, long at) {
         lastButtonPkg = pkg;
         lastButtonAt = at;
+        if (!Build.DISPLAY.equals(prefs.getLogButtonSeenBuild())) {
+            prefs.setLogButtonSeenBuild(Build.DISPLAY);
+        }
         if (prefs.isVerboseLogging()) Log.i(TAG, "Remote button " + button + " opened " + pkg);
         if (!prefs.isLaunchKeyEnabled()) return;
         if (windowMatches(pkg, null, prefs.getLaunchWindow())) {
@@ -548,7 +609,7 @@ public class HijackService extends AccessibilityService {
      */
     private boolean openedByButton(String pkg, long now) {
         if (AMAZON_APPS_GRID.equals(pkg)) return true; // the Apps grid has its own rules
-        if (preciseMode()) {
+        if (preciseButtons()) {
             return pkg.equals(lastButtonPkg) && now - lastButtonAt < BUTTON_EVIDENCE_MS;
         }
         boolean recentOk = (lastKeyCode == KeyEvent.KEYCODE_DPAD_CENTER
@@ -652,6 +713,353 @@ public class HijackService extends AccessibilityService {
                     ? " is the main screen, ignoring Back" : " is not the main screen, passing"));
         }
         return swallow;
+    }
+
+    /** When the typing fallback looks at the app again after bringing it to the front. */
+    private static final long[] TYPE_SEARCH_DELAYS_MS = {700L, 1300L, 2000L, 2800L, 3800L};
+    private int typeSearchToken = 0;
+
+    /**
+     * For an app that takes no search link or ACTION_SEARCH: bring it back to the
+     * front, then use accessibility to find its search box (tapping its Search button
+     * first if no box is showing), type the words in and press Enter. Works for apps
+     * built from standard, Compose or Flutter text fields; apps that paint their own
+     * keyboard expose no text field, and then the user is told so.
+     */
+    private void typeSearchInto(final String app, final String query) {
+        Intent launch = launchIntentFor(app);
+        if (launch == null || mainHandler == null) return;
+        showButtonCover(app);
+        try {
+            startActivity(launch); // an existing task just comes back to the front
+        } catch (Exception e) {
+            hideButtonCover();
+            return;
+        }
+        Log.i(TAG, "Voice search: typing into " + app);
+        final int token = ++typeSearchToken;
+        final boolean[] clickedSearch = {false};
+        for (int i = 0; i < TYPE_SEARCH_DELAYS_MS.length; i++) {
+            final boolean last = i == TYPE_SEARCH_DELAYS_MS.length - 1;
+            mainHandler.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (token != typeSearchToken) return;
+                    int r = trySearchByTyping(app, query, !clickedSearch[0]);
+                    if (r == TYPE_DONE) {
+                        typeSearchToken++;
+                        Log.i(TAG, "Voice search typed into " + app);
+                    } else if (r == TYPE_CLICKED_SEARCH) {
+                        clickedSearch[0] = true;
+                    } else if (last) {
+                        typeSearchToken++;
+                        hideButtonCover();
+                        Log.i(TAG, "Voice search: no search box found in " + app);
+                        android.widget.Toast.makeText(HijackService.this,
+                                getString(R.string.voice_no_search_box, appName(app)),
+                                android.widget.Toast.LENGTH_LONG).show();
+                    }
+                }
+            }, TYPE_SEARCH_DELAYS_MS[i]);
+        }
+    }
+
+    private static final int TYPE_NOT_YET = 0;
+    private static final int TYPE_DONE = 1;
+    private static final int TYPE_CLICKED_SEARCH = 2;
+
+    private int trySearchByTyping(String app, String query, boolean mayClickSearch) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return TYPE_NOT_YET;
+        try {
+            CharSequence pkg = root.getPackageName();
+            if (pkg == null || !app.equals(pkg.toString())) return TYPE_NOT_YET;
+            AccessibilityNodeInfo field = findNode(root, 0, true);
+            if (field != null) {
+                try {
+                    field.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+                    android.os.Bundle args = new android.os.Bundle();
+                    args.putCharSequence(
+                            AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, query);
+                    if (!field.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+                        return TYPE_NOT_YET;
+                    }
+                    // Android 11+: submit like the keyboard's Enter / Search key.
+                    if (Build.VERSION.SDK_INT >= 30) {
+                        field.performAction(AccessibilityNodeInfo.AccessibilityAction
+                                .ACTION_IME_ENTER.getId());
+                    }
+                    return TYPE_DONE;
+                } finally {
+                    field.recycle();
+                }
+            }
+            if (mayClickSearch) {
+                AccessibilityNodeInfo button = findNode(root, 0, false);
+                if (button != null) {
+                    try {
+                        AccessibilityNodeInfo target = button;
+                        // Labels often sit inside the clickable element; click that one.
+                        AccessibilityNodeInfo p = null;
+                        if (!button.isClickable()) {
+                            p = button.getParent();
+                            if (p != null && p.isClickable()) target = p;
+                        }
+                        target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                        if (p != null) p.recycle();
+                        return TYPE_CLICKED_SEARCH;
+                    } finally {
+                        button.recycle();
+                    }
+                }
+            }
+            return TYPE_NOT_YET;
+        } catch (Exception e) {
+            return TYPE_NOT_YET;
+        } finally {
+            root.recycle();
+        }
+    }
+
+    /**
+     * Depth-first search for either an editable text field ({@code wantField}) or a
+     * visible element named like a search button (text, description or view id
+     * containing "search"). The caller recycles the returned node.
+     */
+    private static AccessibilityNodeInfo findNode(AccessibilityNodeInfo node, int depth,
+                                                  boolean wantField) {
+        if (node == null || depth > 30) return null;
+        if (wantField) {
+            CharSequence cls = node.getClassName();
+            if (node.isEditable() || (cls != null && cls.toString().contains("EditText"))) {
+                return AccessibilityNodeInfo.obtain(node);
+            }
+        } else if (node.isVisibleToUser() && namesSearch(node)) {
+            return AccessibilityNodeInfo.obtain(node);
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo c = node.getChild(i);
+            if (c == null) continue;
+            try {
+                AccessibilityNodeInfo hit = findNode(c, depth + 1, wantField);
+                if (hit != null) return hit;
+            } finally {
+                c.recycle();
+            }
+        }
+        return null;
+    }
+
+    private static boolean namesSearch(AccessibilityNodeInfo n) {
+        CharSequence[] parts = {n.getText(), n.getContentDescription(), n.getViewIdResourceName()};
+        for (CharSequence c : parts) {
+            if (c != null && c.toString().toLowerCase(java.util.Locale.ROOT).contains("search")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String appName(String pkg) {
+        try {
+            PackageManager pm = getPackageManager();
+            return pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
+        } catch (Exception e) {
+            return pkg;
+        }
+    }
+
+    /** Remembers the last ordinary app in front (not Amazon's shell, Alexa or us). */
+    private void trackUserApp(String pkg, String cls) {
+        if (pkg == null || !isRealContentClass(cls)) return;
+        if (pkg.equals(getPackageName()) || isSystemDecorPkg(pkg) || ALEXA_PKG.equals(pkg)) return;
+        if (pkg.startsWith("com.amazon.") && !isLeanbackLaunchable(pkg)) return;
+        lastUserApp = pkg;
+        lastUserAppAt = System.currentTimeMillis();
+    }
+
+    /**
+     * Alexa answered a voice request with its own search page. If the user was in an
+     * app that can take a search itself, read the spoken words off that page and run
+     * the search there instead. Anything Alexa does NOT turn into this page (commands,
+     * questions, smart-home) never gets here and is left alone.
+     */
+    private void handleAlexaSearchPage() {
+        if (!prefs.isVoiceSearchToApp() || mainHandler == null) return;
+        if (lastUserApp == null) {
+            // Nothing tracked since the service started: fall back to the foreground
+            // trackers, which still hold the app that was in front before Alexa.
+            for (String cand : new String[]{previousForegroundPkg, currentForegroundPkg}) {
+                trackUserApp(cand, "fallback");
+                if (lastUserApp != null) break;
+            }
+        }
+        final String app = lastUserApp;
+        Log.i(TAG, "Alexa search page up; app before it: " + app + " ("
+                + (System.currentTimeMillis() - lastUserAppAt) + "ms ago)");
+        if (app == null || System.currentTimeMillis() - lastUserAppAt > VOICE_ORIGIN_MAX_AGE_MS) {
+            return;
+        }
+        // The launcher is home: there is no "app you were in" to search.
+        if (app.equals(prefs.getTargetPackage())) return;
+        final int token = ++voiceReadToken;
+        // Amazon marks the query line "not important for accessibility", which hides it
+        // from services by default. Ask for hidden views only while reading this page;
+        // the rest of the service keeps working on the normal, smaller trees.
+        setIncludeHiddenViews(true);
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() { setIncludeHiddenViews(false); }
+        }, VOICE_READ_DELAYS_MS[VOICE_READ_DELAYS_MS.length - 1] + 300L);
+        for (final long delay : VOICE_READ_DELAYS_MS) {
+            mainHandler.postDelayed(new Runnable() {
+                @Override public void run() {
+                    if (token != voiceReadToken) return; // already handled
+                    String query = readAlexaQuery();
+                    if (query == null) {
+                        if (delay == VOICE_READ_DELAYS_MS[VOICE_READ_DELAYS_MS.length - 1]) {
+                            Log.i(TAG, "Voice search: no spoken text found on Alexa's page");
+                        }
+                        return;
+                    }
+                    voiceReadToken++; // done: later retries stand down
+                    setIncludeHiddenViews(false);
+                    Intent search = searchIntentFor(app, query);
+                    if (search == null) {
+                        typeSearchInto(app, query);
+                        return;
+                    }
+                    showButtonCover(app);
+                    try {
+                        startActivity(search);
+                        Log.i(TAG, "Voice search sent to " + app);
+                    } catch (Exception e) {
+                        hideButtonCover();
+                        Log.w(TAG, "Voice search to " + app + " failed: " + e);
+                    }
+                }
+            }, delay);
+        }
+    }
+
+    private void setIncludeHiddenViews(boolean include) {
+        try {
+            android.accessibilityservice.AccessibilityServiceInfo info = getServiceInfo();
+            if (info == null) return;
+            int flag = android.accessibilityservice.AccessibilityServiceInfo
+                    .FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
+            boolean has = (info.flags & flag) != 0;
+            if (has == include) return;
+            info.flags = include ? (info.flags | flag) : (info.flags & ~flag);
+            setServiceInfo(info);
+        } catch (Exception e) {
+            Log.w(TAG, "Could not change the hidden-views flag: " + e);
+        }
+    }
+
+    /**
+     * The spoken words from Alexa's search page, or null if it is not up (yet). Walks
+     * every window (Alexa's own voice overlay can still hold focus on top of the page)
+     * and every node, matching the query line by its view id, with the topmost text on
+     * the page as a fallback. A plain walk rather than findAccessibilityNodeInfosByViewId,
+     * which came back empty on Fire OS 8.1.8.5 although the node carries that id.
+     */
+    private String readAlexaQuery() {
+        java.util.List<AccessibilityNodeInfo> roots = new java.util.ArrayList<AccessibilityNodeInfo>();
+        java.util.List<android.view.accessibility.AccessibilityWindowInfo> windows = getWindows();
+        if (windows != null) {
+            for (android.view.accessibility.AccessibilityWindowInfo w : windows) {
+                if (w == null) continue;
+                AccessibilityNodeInfo r = w.getRoot();
+                if (r != null) roots.add(r);
+                w.recycle();
+            }
+        }
+        AccessibilityNodeInfo active = getRootInActiveWindow();
+        if (active != null) roots.add(active);
+        QueryScan scan = new QueryScan();
+        for (AccessibilityNodeInfo root : roots) {
+            try {
+                CharSequence pkg = root.getPackageName();
+                scan.windows.append(pkg).append(' ');
+                if (pkg != null && AMAZON_LAUNCHER.equals(pkg.toString())) {
+                    root.refresh();
+                    walkForQuery(root, 0, scan);
+                }
+            } catch (Exception ignored) {
+                // a node went stale while the page was building
+            } finally {
+                root.recycle();
+            }
+        }
+        String query = scan.byId != null ? scan.byId : scan.topText;
+        if (prefs.isVerboseLogging()) Log.i(TAG, "Voice search read: windows=[" + scan.windows.toString().trim()
+                + "] nodes=" + scan.nodes + " texts=" + scan.texts
+                + " searchIds=" + scan.searchIds
+                + " byId=" + (scan.byId != null) + " top=" + (scan.topText != null)
+                + " query=" + (query == null ? "none" : "\"" + query + "\""));
+        return query;
+    }
+
+    private static final class QueryScan {
+        final StringBuilder windows = new StringBuilder();
+        int nodes, texts;
+        String byId;
+        String topText;
+        int topY = Integer.MAX_VALUE;
+        final java.util.List<String> searchIds = new java.util.ArrayList<String>();
+    }
+
+    private static void walkForQuery(AccessibilityNodeInfo node, int depth, QueryScan scan) {
+        if (node == null || depth > 30 || scan.nodes > 3000) return;
+        scan.nodes++;
+        CharSequence id = node.getViewIdResourceName();
+        CharSequence text = node.getText();
+        if (id != null && id.toString().contains("search") && scan.searchIds.size() < 6) {
+            scan.searchIds.add(id.toString().substring(id.toString().lastIndexOf('/') + 1));
+        }
+        if (text != null && text.toString().trim().length() > 0) {
+            scan.texts++;
+            String t = text.toString().trim();
+            if (scan.byId == null && id != null && id.toString().endsWith("/search_text")) {
+                scan.byId = t;
+            }
+            android.graphics.Rect b = new android.graphics.Rect();
+            node.getBoundsInScreen(b);
+            // The query line sits alone at the very top-left of the page.
+            if (b.top >= 0 && b.top < scan.topY && b.top < 200 && b.left < 400) {
+                scan.topY = b.top;
+                scan.topText = t;
+            }
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo c = node.getChild(i);
+            if (c == null) continue;
+            try {
+                walkForQuery(c, depth + 1, scan);
+            } finally {
+                c.recycle();
+            }
+        }
+    }
+
+    /**
+     * How to hand {@code query} to {@code app}, or null if it takes no search:
+     *  1. a YouTube search link, for YouTube and its clients (TizenTube, SmartTube, ...),
+     *     which open youtube.com links on the results page, verified on TizenTube;
+     *  2. Android's standard ACTION_SEARCH, for apps that declare a searchable activity.
+     */
+    private Intent searchIntentFor(String app, String query) {
+        PackageManager pm = getPackageManager();
+        Intent yt = new Intent(Intent.ACTION_VIEW, android.net.Uri.parse(
+                "https://www.youtube.com/results?search_query=" + android.net.Uri.encode(query)));
+        yt.setPackage(app);
+        yt.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (pm.resolveActivity(yt, 0) != null) return yt;
+        Intent search = new Intent(Intent.ACTION_SEARCH);
+        search.setPackage(app);
+        search.putExtra(android.app.SearchManager.QUERY, query);
+        search.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        if (pm.resolveActivity(search, 0) != null) return search;
+        return null;
     }
 
     private void enterEscape(String why) {
@@ -977,6 +1385,10 @@ public class HijackService extends AccessibilityService {
             targetShownAt = System.currentTimeMillis();
         }
         maybeClearEscape(pkgStr, clsStr);
+        trackUserApp(pkgStr, clsStr);
+        if (AMAZON_LAUNCHER.equals(pkgStr) && ALEXA_SEARCH_CLS.equals(clsStr)) {
+            handleAlexaSearchPage();
+        }
         if (buttonCoverFor != null && pkgStr != null && pkgStr.equals(buttonCoverFor)
                 && isRealContentClass(clsStr)) {
             hideButtonCoverSoon();
