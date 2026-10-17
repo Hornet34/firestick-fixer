@@ -267,6 +267,20 @@ public class MainActivity extends Activity {
         return lp;
     }
 
+    /** Row title with a smaller, dimmer one-line explanation underneath. */
+    private CharSequence titled(CharSequence title, int descRes) {
+        android.text.SpannableStringBuilder b = new android.text.SpannableStringBuilder();
+        b.append(badgeKeys(title));
+        b.append("\n");
+        int start = b.length();
+        b.append(getString(descRes));
+        b.setSpan(new android.text.style.RelativeSizeSpan(0.78f), start, b.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        b.setSpan(new android.text.style.ForegroundColorSpan(Colors.DIM), start, b.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        return b;
+    }
+
     /** Small all-caps heading above a section card. */
     private TextView sectionHeading(String text) {
         TextView h = new TextView(this);
@@ -491,7 +505,7 @@ public class MainActivity extends Activity {
     private void addSwitches(LinearLayout content) {
         LinearLayout home = addCard(content, getString(R.string.section_home));
         accessSwitch = makeSwitchRow(home,
-                getString(R.string.switch_accessibility),
+                titled(getString(R.string.switch_accessibility), R.string.desc_accessibility),
                 getString(R.string.switch_accessibility_tip),
                 AccessibilityHelper.isOurServiceEnabled(this),
                 new CompoundButton.OnCheckedChangeListener() {
@@ -514,7 +528,7 @@ public class MainActivity extends Activity {
                 });
         addHomeRow(home);
         backStaySwitch = makeSwitchRow(home,
-                getString(R.string.switch_back_stays),
+                titled(getString(R.string.switch_back_stays), R.string.desc_back),
                 getString(R.string.switch_back_stays_tip),
                 prefs.isBackStaysOnLauncher(),
                 prefToggle(new PrefSetter() {
@@ -526,7 +540,7 @@ public class MainActivity extends Activity {
         // Live TV (learned as screen redirects).
         addLaunchKeyRow(buttons);
         voiceSwitch = makeSwitchRow(buttons,
-                getString(R.string.switch_voice_search),
+                titled(getString(R.string.switch_voice_search), R.string.desc_voice),
                 getString(R.string.switch_voice_search_tip),
                 prefs.isVoiceSearchToApp(),
                 prefToggle(new PrefSetter() {
@@ -551,7 +565,7 @@ public class MainActivity extends Activity {
         outer.setOrientation(LinearLayout.HORIZONTAL);
         outer.setGravity(Gravity.CENTER_VERTICAL);
         bootSwitch = makeSwitchRow(outer,
-                getString(R.string.switch_boot),
+                titled(getString(R.string.switch_boot), R.string.desc_boot),
                 getString(R.string.switch_boot_tip),
                 prefs.getLaunchOnBoot(),
                 prefToggle(new PrefSetter() {
@@ -641,7 +655,7 @@ public class MainActivity extends Activity {
         row.setBackground(getDrawable(R.drawable.row_focus_bg));
 
         TextView tv = new TextView(this);
-        tv.setText(R.string.precise_label);
+        tv.setText(titled(getString(R.string.precise_label), R.string.desc_precise));
         tv.setTextSize(18);
         tv.setTextColor(Colors.NEUTRAL);
         row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
@@ -793,7 +807,7 @@ public class MainActivity extends Activity {
         row.addView(sw, swLp);
 
         TextView tv = new TextView(this);
-        tv.setText(badgeKeys(getString(R.string.switch_hijack)));
+        tv.setText(titled(getString(R.string.switch_hijack), R.string.desc_hijack));
         tv.setTextSize(18);
         tv.setTextColor(Colors.NEUTRAL);
         LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(
@@ -1071,7 +1085,7 @@ public class MainActivity extends Activity {
         row.addView(sw, swLp);
 
         TextView tv = new TextView(this);
-        tv.setText(getString(R.string.launch_key_label));
+        tv.setText(titled(getString(R.string.launch_key_label), R.string.desc_remap));
         tv.setTextSize(18);
         tv.setTextColor(Colors.NEUTRAL);
         LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(
@@ -2224,7 +2238,7 @@ public class MainActivity extends Activity {
         row.addView(sw, swLp);
 
         TextView tv = new TextView(this);
-        tv.setText(R.string.switch_verbose);
+        tv.setText(titled(getString(R.string.switch_verbose), R.string.desc_verbose));
         tv.setTextSize(18);
         tv.setTextColor(Colors.NEUTRAL);
         LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(

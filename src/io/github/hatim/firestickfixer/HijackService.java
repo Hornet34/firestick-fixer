@@ -751,7 +751,7 @@ public class HijackService extends AccessibilityService {
     }
 
     /** When the typing fallback looks at the app again after bringing it to the front. */
-    private static final long[] TYPE_SEARCH_DELAYS_MS = {700L, 1300L, 2000L, 2800L, 3800L};
+    private static final long[] TYPE_SEARCH_DELAYS_MS = {700L, 1300L, 1900L, 2600L, 3400L, 4400L};
     private int typeSearchToken = 0;
 
     /**
@@ -782,12 +782,15 @@ public class HijackService extends AccessibilityService {
                     int r = trySearchByTyping(app, query, !clickedSearch[0]);
                     if (r == TYPE_DONE) {
                         typeSearchToken++;
+                        prefs.setVoiceSearchFailed(app, false);
                         Log.i(TAG, "Voice search typed into " + app);
                     } else if (r == TYPE_CLICKED_SEARCH) {
                         clickedSearch[0] = true;
                     } else if (last) {
                         typeSearchToken++;
                         hideButtonCover();
+                        // Remembered, so next time Alexa's results stay up for this app.
+                        prefs.setVoiceSearchFailed(app, true);
                         Log.i(TAG, "Voice search: no search box found in " + app);
                         android.widget.Toast.makeText(HijackService.this,
                                 getString(R.string.voice_no_search_box, appName(app)),
@@ -801,6 +804,7 @@ public class HijackService extends AccessibilityService {
     private static final int TYPE_NOT_YET = 0;
     private static final int TYPE_DONE = 1;
     private static final int TYPE_CLICKED_SEARCH = 2;
+    private static final int TYPE_REVEALED_MENU = 3;
 
     private int trySearchByTyping(String app, String query, boolean mayClickSearch) {
         AccessibilityNodeInfo root = getRootInActiveWindow();
@@ -828,27 +832,20 @@ public class HijackService extends AccessibilityService {
                     field.recycle();
                 }
             }
-            if (mayClickSearch && clickSearchByRecipe(app, root)) {
-                return TYPE_CLICKED_SEARCH;
-            }
             if (mayClickSearch) {
                 AccessibilityNodeInfo button = findNode(root, 0, false);
                 if (button != null) {
                     try {
-                        AccessibilityNodeInfo target = button;
-                        // Labels often sit inside the clickable element; click that one.
-                        AccessibilityNodeInfo p = null;
-                        if (!button.isClickable()) {
-                            p = button.getParent();
-                            if (p != null && p.isClickable()) target = p;
-                        }
-                        target.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                        if (p != null) p.recycle();
-                        return TYPE_CLICKED_SEARCH;
+                        if (clickSelfOrAncestor(button)) return TYPE_CLICKED_SEARCH;
                     } finally {
                         button.recycle();
                     }
                 }
+                // No labelled Search anywhere. Many TV apps (Nuvio and other Compose / Leanback
+                // apps) keep a collapsed side menu of bare icons that only shows its labels
+                // once it has focus. Focus it once and look for the label again next round:
+                // this finds Search by its NAME, so a reordered or redesigned menu still works.
+                if (focusSideMenu(root)) return TYPE_REVEALED_MENU;
             }
             return TYPE_NOT_YET;
         } catch (Exception e) {
@@ -887,68 +884,96 @@ public class HijackService extends AccessibilityService {
         return null;
     }
 
-    /**
-     * Per-app ways to reach a search screen whose button carries no label. Kept to a
-     * table of tiny recipes so another app needs a few lines, not a new mechanism.
-     *
-     * Nuvio (com.nuvio.tv): a left side menu of unlabeled icons. From its source
-     * (NuvioMedia/NuvioTV, MainActivity drawer items) the order is Home, [Discover when
-     * placed in the sidebar], Search, Library, Settings; when Discover sits in the top
-     * bar instead, the top bar carries an "Open discover" button.
-     */
-    private boolean clickSearchByRecipe(String app, AccessibilityNodeInfo root) {
-        if (!"com.nuvio.tv".equals(app)) return false;
-        int screenW = getResources().getDisplayMetrics().widthPixels;
-        java.util.List<AccessibilityNodeInfo> rail = new java.util.ArrayList<AccessibilityNodeInfo>();
-        boolean[] discoverOnTop = {false};
-        collectRail(root, 0, screenW / 10, rail, discoverOnTop);
-        java.util.Collections.sort(rail, new java.util.Comparator<AccessibilityNodeInfo>() {
-            @Override public int compare(AccessibilityNodeInfo a, AccessibilityNodeInfo b) {
-                android.graphics.Rect ra = new android.graphics.Rect();
-                android.graphics.Rect rb = new android.graphics.Rect();
-                a.getBoundsInScreen(ra);
-                b.getBoundsInScreen(rb);
-                return ra.top - rb.top;
+    /** Clicks the node, or the nearest clickable ancestor (labels sit inside the button). */
+    private static boolean clickSelfOrAncestor(AccessibilityNodeInfo node) {
+        AccessibilityNodeInfo cur = AccessibilityNodeInfo.obtain(node);
+        for (int i = 0; i < 4 && cur != null; i++) {
+            if (cur.isClickable()) {
+                boolean ok = cur.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                cur.recycle();
+                return ok;
             }
-        });
-        int index = discoverOnTop[0] ? 1 : 2;
-        boolean clicked = false;
-        if (rail.size() > index) {
-            clicked = rail.get(index).performAction(AccessibilityNodeInfo.ACTION_CLICK);
-            Log.i(TAG, "Voice search: Nuvio side menu item " + (index + 1) + " of "
-                    + rail.size() + " clicked=" + clicked);
+            AccessibilityNodeInfo parent = cur.getParent();
+            cur.recycle();
+            cur = parent;
         }
-        for (AccessibilityNodeInfo n : rail) n.recycle();
-        return clicked;
+        if (cur != null) cur.recycle();
+        return false;
     }
 
-    /** Clickable items in the narrow strip on the left edge (Nuvio's side menu). */
-    private static void collectRail(AccessibilityNodeInfo node, int depth, int maxRight,
-                                    java.util.List<AccessibilityNodeInfo> out, boolean[] discoverOnTop) {
-        if (node == null || depth > 30) return;
-        CharSequence desc = node.getContentDescription();
-        if (desc != null && desc.toString().toLowerCase(java.util.Locale.ROOT).contains("discover")) {
-            android.graphics.Rect b = new android.graphics.Rect();
-            node.getBoundsInScreen(b);
-            if (b.left > maxRight) discoverOnTop[0] = true;
+    /**
+     * Gives focus to the first focusable element in the strip along the left edge, where
+     * TV apps put their side menu; a collapsed menu expands and shows its labels. Returns
+     * false when the app has nothing there.
+     */
+    private boolean focusSideMenu(AccessibilityNodeInfo root) {
+        int maxRight = getResources().getDisplayMetrics().widthPixels / 8;
+        AccessibilityNodeInfo item = findLeftEdgeFocusable(root, 0, maxRight);
+        if (item == null) return false;
+        try {
+            boolean ok = item.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
+            Log.i(TAG, "Voice search: opened the side menu to find Search, ok=" + ok);
+            return ok;
+        } finally {
+            item.recycle();
         }
-        if (node.isClickable() && node.isVisibleToUser()) {
+    }
+
+    private static AccessibilityNodeInfo findLeftEdgeFocusable(AccessibilityNodeInfo node, int depth,
+                                                              int maxRight) {
+        if (node == null || depth > 30) return null;
+        if (node.isFocusable() && node.isVisibleToUser()) {
             android.graphics.Rect b = new android.graphics.Rect();
             node.getBoundsInScreen(b);
-            if (b.right <= maxRight && b.height() > 40) {
-                out.add(AccessibilityNodeInfo.obtain(node));
-                return;
+            if (b.right <= maxRight && b.height() > 40 && b.width() > 40) {
+                return AccessibilityNodeInfo.obtain(node);
             }
         }
         for (int i = 0; i < node.getChildCount(); i++) {
             AccessibilityNodeInfo c = node.getChild(i);
             if (c == null) continue;
             try {
-                collectRail(c, depth + 1, maxRight, out, discoverOnTop);
+                AccessibilityNodeInfo hit = findLeftEdgeFocusable(c, depth + 1, maxRight);
+                if (hit != null) return hit;
             } finally {
                 c.recycle();
             }
         }
+        return null;
+    }
+
+    /**
+     * Whether {@code app}, as it is on screen right now, offers something voice search can
+     * use: a search box, an element labelled Search, or a side menu that may reveal one.
+     * Read while the user holds the Alexa button, when the app is still visible under
+     * Alexa's listening bar, because once Alexa's results page is up the app is hidden
+     * and that page cannot be reopened by an app.
+     */
+    private boolean appLooksSearchable(String app) {
+        java.util.List<android.view.accessibility.AccessibilityWindowInfo> windows = getWindows();
+        if (windows == null) return false;
+        boolean found = false;
+        int maxRight = getResources().getDisplayMetrics().widthPixels / 8;
+        for (android.view.accessibility.AccessibilityWindowInfo w : windows) {
+            if (w == null) continue;
+            AccessibilityNodeInfo r = w.getRoot();
+            w.recycle();
+            if (r == null) continue;
+            try {
+                CharSequence pkg = r.getPackageName();
+                if (found || pkg == null || !app.equals(pkg.toString())) continue;
+                AccessibilityNodeInfo hit = findNode(r, 0, true);
+                if (hit == null) hit = findNode(r, 0, false);
+                if (hit == null) hit = findLeftEdgeFocusable(r, 0, maxRight);
+                if (hit != null) {
+                    found = true;
+                    hit.recycle();
+                }
+            } finally {
+                r.recycle();
+            }
+        }
+        return found;
     }
 
     private static boolean namesSearch(AccessibilityNodeInfo n) {
@@ -1003,6 +1028,11 @@ public class HijackService extends AccessibilityService {
         }
         // The launcher is home: there is no "app you were in" to search.
         if (app.equals(prefs.getTargetPackage())) return;
+        if (!canSearchIn(app)) {
+            Log.i(TAG, "Voice search: " + app + " has no usable search, keeping Alexa's results");
+            showNoSearchNotice(app);
+            return;
+        }
         final int token = ++voiceReadToken;
         // Cover Alexa's page right away with the decision panel: it hides the page and,
         // later, the switch to the app, and gives the user a moment to keep Alexa's
@@ -1033,6 +1063,26 @@ public class HijackService extends AccessibilityService {
                 }
             }, delay);
         }
+    }
+
+    private String voiceProbeApp;
+    private long voiceProbeAt;
+    private boolean voiceProbeSearchable;
+    /** How long a probe taken while Alexa listened still describes the app. */
+    private static final long VOICE_PROBE_MAX_AGE_MS = 30_000L;
+
+    /**
+     * Whether a voice search can be handed to {@code app}: a search link or intent always
+     * can; otherwise the app must not have failed before and, when a probe was taken while
+     * Alexa listened, must have shown something searchable.
+     */
+    private boolean canSearchIn(String app) {
+        if (searchIntentFor(app, "x") != null) return true;
+        if (prefs.isVoiceSearchFailed(app)) return false;
+        if (app.equals(voiceProbeApp) && System.currentTimeMillis() - voiceProbeAt < VOICE_PROBE_MAX_AGE_MS) {
+            return voiceProbeSearchable;
+        }
+        return true; // unknown: try once
     }
 
     /** How long the decision panel waits before searching in the app. */
@@ -1137,6 +1187,49 @@ public class HijackService extends AccessibilityService {
         }
         voiceApp = null;
         voiceQuery = null;
+    }
+
+    /** Short notice on top of Alexa's results: why they stay. Gone after 3 s or any key. */
+    private android.view.View noSearchNotice;
+    private void showNoSearchNotice(String app) {
+        if (windowManager == null || mainHandler == null) return;
+        hideNoSearchNotice();
+        float d = getResources().getDisplayMetrics().density;
+        android.widget.TextView t = new android.widget.TextView(this);
+        t.setText(getString(R.string.voice_no_search_notice, appName(app)));
+        t.setTextColor(0xFFFFFFFF);
+        t.setTextSize(18);
+        t.setPadding((int) (24 * d), (int) (14 * d), (int) (24 * d), (int) (14 * d));
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(0xF00F172A);
+        bg.setStroke((int) (2 * d), 0xFFF59E0B);
+        bg.setCornerRadius(14 * d);
+        t.setBackground(bg);
+        WindowManager.LayoutParams lp = maskLayoutParams();
+        lp.width = WindowManager.LayoutParams.WRAP_CONTENT;
+        lp.height = WindowManager.LayoutParams.WRAP_CONTENT;
+        lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+        lp.y = (int) (48 * d);
+        try {
+            windowManager.addView(t, lp);
+            noSearchNotice = t;
+            mainHandler.postDelayed(new Runnable() {
+                @Override public void run() { hideNoSearchNotice(); }
+            }, 3_500L);
+        } catch (Exception e) {
+            Log.w(TAG, "Could not show the notice: " + e);
+        }
+    }
+
+    private void hideNoSearchNotice() {
+        if (noSearchNotice != null) {
+            try {
+                if (windowManager != null) windowManager.removeView(noSearchNotice);
+            } catch (Exception ignored) {
+                // already gone
+            }
+            noSearchNotice = null;
+        }
     }
 
     private void hideVoicePanel() {
@@ -1634,6 +1727,13 @@ public class HijackService extends AccessibilityService {
         }
         maybeClearEscape(pkgStr, clsStr);
         trackUserApp(pkgStr, clsStr);
+        if (ALEXA_PKG.equals(pkgStr) && lastUserApp != null && prefs.isVoiceSearchToApp()) {
+            // Alexa's listening bar: the app is still on screen underneath. Note now
+            // whether it has a search we can drive.
+            voiceProbeApp = lastUserApp;
+            voiceProbeAt = System.currentTimeMillis();
+            voiceProbeSearchable = appLooksSearchable(lastUserApp);
+        }
         if (AMAZON_LAUNCHER.equals(pkgStr) && ALEXA_SEARCH_CLS.equals(clsStr)) {
             handleAlexaSearchPage();
         }
@@ -3610,6 +3710,7 @@ public class HijackService extends AccessibilityService {
         cancelMask();
         detachCover();
         hideVoicePanel();
+        hideNoSearchNotice();
         if (logWatcher != null) logWatcher.stop();
         if (screenOnReceiver != null) {
             try {

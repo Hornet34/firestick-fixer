@@ -217,6 +217,20 @@ public class Prefs {
     }
 
     private static final String KEY_VOICE_SEARCH = "voice_search_to_app";
+    private static final String KEY_VOICE_FAILED = "voice_search_failed_apps";
+
+    /** Apps where voice search found nothing to type into; Alexa's results stay for them. */
+    public boolean isVoiceSearchFailed(String pkg) {
+        return sp.getStringSet(KEY_VOICE_FAILED, java.util.Collections.<String>emptySet()).contains(pkg);
+    }
+
+    public void setVoiceSearchFailed(String pkg, boolean failed) {
+        java.util.Set<String> set = new java.util.HashSet<String>(
+                sp.getStringSet(KEY_VOICE_FAILED, java.util.Collections.<String>emptySet()));
+        if (failed ? set.add(pkg) : set.remove(pkg)) {
+            sp.edit().putStringSet(KEY_VOICE_FAILED, set).apply();
+        }
+    }
     private static final String KEY_LOG_HOME_BUILD = "log_home_seen_build";
     private static final String KEY_LOG_BUTTON_BUILD = "log_button_seen_build";
 
