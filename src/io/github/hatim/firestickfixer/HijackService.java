@@ -1258,7 +1258,7 @@ public class HijackService extends AccessibilityService {
         android.widget.LinearLayout col = new android.widget.LinearLayout(this);
         col.setOrientation(android.widget.LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
-        col.setBackgroundColor(0xF2111317);
+        col.setBackgroundColor(0xF20B1220);
         android.widget.ImageView icon = new android.widget.ImageView(this);
         try {
             icon.setImageDrawable(getPackageManager().getApplicationIcon(app));
@@ -1274,7 +1274,7 @@ public class HijackService extends AccessibilityService {
         col.addView(title);
         voicePanelQuery = new android.widget.TextView(this);
         voicePanelQuery.setText(R.string.voice_panel_listening);
-        voicePanelQuery.setTextColor(0xFFFF8A00);
+        voicePanelQuery.setTextColor(0xFF2DD4BF);
         voicePanelQuery.setTextSize(30);
         voicePanelQuery.setGravity(Gravity.CENTER);
         col.addView(voicePanelQuery);
@@ -1282,7 +1282,7 @@ public class HijackService extends AccessibilityService {
                 android.R.attr.progressBarStyleHorizontal);
         voicePanelBar.setMax(1000);
         voicePanelBar.setProgress(0);
-        voicePanelBar.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFFFF8A00));
+        voicePanelBar.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFF2DD4BF));
         android.widget.LinearLayout.LayoutParams barLp = new android.widget.LinearLayout.LayoutParams(
                 (int) (420 * d), (int) (8 * d));
         barLp.topMargin = (int) (28 * d);
@@ -1290,7 +1290,7 @@ public class HijackService extends AccessibilityService {
         android.widget.TextView hint = new android.widget.TextView(this);
         hint.setText(R.string.voice_panel_hint);
         voicePanelHint = hint;
-        hint.setTextColor(0xFF9CA3AF);
+        hint.setTextColor(0xFF94A3B8);
         hint.setTextSize(18);
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(0, (int) (24 * d), 0, 0);

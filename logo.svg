@@ -1,16 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="512" height="512">
-  <title>FireStick Fixer: a Fire TV Stick, with a wrench</title>
-  <path fill="#15171C" d="M10,0h28a10,10 0 0 1 10,10v28a10,10 0 0 1 -10,10h-28a10,10 0 0 1 -10,-10v-28a10,10 0 0 1 10,-10z"/>
+  <title>FireStick Fixer: a Fire TV Stick with a wrench</title>
+  <path fill="#0B1220" d="M10,0h28a10,10 0 0 1 10,10v28a10,10 0 0 1 -10,10h-28a10,10 0 0 1 -10,-10v-28a10,10 0 0 1 10,-10z"/>
   <g transform="rotate(-35 24 22)">
-    <rect x="5" y="16" width="28" height="12.5" rx="4.6" fill="#FF8A00"/>
-    <rect x="8" y="17.7" width="22" height="1.6" rx="0.8" fill="#FFB347"/>
-    <rect x="32" y="18.2" width="9.5" height="8.1" rx="1.2" fill="#C7CCD4"/>
-    <rect x="34.6" y="20.5" width="5" height="3.5" rx="0.6" fill="#15171C"/>
+    <rect x="5" y="16" width="28" height="12.5" rx="4.6" fill="#14B8A6"/>
+    <rect x="8" y="17.7" width="22" height="1.6" rx="0.8" fill="#5EEAD4"/>
+    <rect x="32" y="18.2" width="9.5" height="8.1" rx="1.2" fill="#CBD5E1"/>
+    <rect x="34.6" y="20.5" width="5" height="3.5" rx="0.6" fill="#0B1220"/>
     <circle cx="9.6" cy="22.25" r="1.4" fill="#FFFFFF"/>
   </g>
-  <g transform="translate(29 32) scale(0.78) rotate(-135) translate(-24 -12.5)">
-    <rect x="22.3" y="16" width="3.4" height="24" rx="1.7" fill="#FFFFFF" stroke="#15171C" stroke-width="1.6"/>
-    <circle cx="24" cy="12.5" r="6" fill="#FFFFFF" stroke="#15171C" stroke-width="1.6"/>
-    <rect x="22" y="5.2" width="4" height="6.6" rx="0.8" fill="#15171C"/>
+  <g transform="translate(21 24) rotate(-45) translate(-24 -24)">
+    <rect x="22.1" y="16" width="3.8" height="22" rx="1.9" fill="#F59E0B" stroke="#0B1220" stroke-width="1.4"/>
+    <circle cx="24" cy="12.5" r="6.2" fill="#F59E0B" stroke="#0B1220" stroke-width="1.4"/>
+    <rect x="21.9" y="5" width="4.2" height="6.8" rx="0.8" fill="#0B1220"/>
   </g>
 </svg>

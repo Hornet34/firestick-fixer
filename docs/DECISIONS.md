@@ -151,7 +151,7 @@ made. Dates are 2026. Test device throughout: Fire TV Stick AFTMA08C15, Fire OS 
   Never ftv-smtv.ntp-fireos.com (clock).
 
 ### D21 — Look and logo (Oct 17–18)
-- (Superseded by D22.) Midnight navy + teal, cards per section, one-line description under every setting.
+- Midnight navy + teal (kept, see D22), cards per section, one-line description under every setting.
 - Logo: a home outline with an amber arrow leaving it — "Home, redirected", the app's core
   promise. Banner tagline: "Home goes where you want."
 
@@ -160,8 +160,11 @@ made. Dates are 2026. Test device throughout: Fire TV Stick AFTMA08C15, Fire OS 
 - **Decision:** an original drawing of the Fire TV Stick itself (orange HDMI dongle with
   its plug) with a wrench on it. Copying Amazon's logo or wordmark, even modified, would
   suggest Amazon made or endorses the app (trademark) and risks takedowns of the repo.
-- **UI follows the logo:** graphite background, Fire orange accent, green for "all good",
-  yellow for "needs attention"; tagline "Your Fire TV, your rules."
+- **Revised the same day (owner's feedback):** the orange theme was replaced again by
+  the earlier navy + teal, which reads calmer on a TV and doesn't look like an Amazon
+  product. The stick is drawn in teal, and the wrench was enlarged and turned to cross
+  the stick (it was too small to read at icon size); the HDMI plug stays visible.
+  Amber for "attention", green for "all good"; tagline "Your Fire TV, your rules."
 
 ### D23 — Test every feature, even switched-off ones (Oct 18, owner's rule)
 - **Decision:** `tools/device-test.sh` records the six feature switches, turns all on,

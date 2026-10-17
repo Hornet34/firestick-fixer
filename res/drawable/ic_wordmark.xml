@@ -1,21 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- FireStick Fixer mark for the Fire OS 7 loading screen: the stick-and-wrench logo
-     without its tile. -->
+<!-- FireStick Fixer mark for the Fire OS 7 loading screen: the logo without its tile. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="48dp" android:height="48dp"
     android:viewportWidth="48" android:viewportHeight="48">
     <group android:rotation="-35" android:pivotX="24" android:pivotY="22">
-        <path android:fillColor="#FFFF8A00" android:pathData="M9.6,16.0h18.8a4.6,4.6 0 0 1 4.6,4.6v3.3000000000000007a4.6,4.6 0 0 1 -4.6,4.6h-18.8a4.6,4.6 0 0 1 -4.6,-4.6v-3.3000000000000007a4.6,4.6 0 0 1 4.6,-4.6z" />
-        <path android:fillColor="#FFFFB347" android:pathData="M8.8,17.7h20.4a0.8,0.8 0 0 1 0.8,0.8v0.0a0.8,0.8 0 0 1 -0.8,0.8h-20.4a0.8,0.8 0 0 1 -0.8,-0.8v-0.0a0.8,0.8 0 0 1 0.8,-0.8z" />
-        <path android:fillColor="#FFC7CCD4" android:pathData="M33.2,18.2h7.1a1.2,1.2 0 0 1 1.2,1.2v5.699999999999999a1.2,1.2 0 0 1 -1.2,1.2h-7.1a1.2,1.2 0 0 1 -1.2,-1.2v-5.699999999999999a1.2,1.2 0 0 1 1.2,-1.2z" />
-        <path android:fillColor="#FF15171C" android:pathData="M35.2,20.5h3.8a0.6,0.6 0 0 1 0.6,0.6v2.3a0.6,0.6 0 0 1 -0.6,0.6h-3.8a0.6,0.6 0 0 1 -0.6,-0.6v-2.3a0.6,0.6 0 0 1 0.6,-0.6z" />
+        <path android:fillColor="#FF14B8A6" android:pathData="M9.6,16.0h18.8a4.6,4.6 0 0 1 4.6,4.6v3.3000000000000007a4.6,4.6 0 0 1 -4.6,4.6h-18.8a4.6,4.6 0 0 1 -4.6,-4.6v-3.3000000000000007a4.6,4.6 0 0 1 4.6,-4.6z" />
+        <path android:fillColor="#FF5EEAD4" android:pathData="M8.8,17.7h20.4a0.8,0.8 0 0 1 0.8,0.8v0.0a0.8,0.8 0 0 1 -0.8,0.8h-20.4a0.8,0.8 0 0 1 -0.8,-0.8v-0.0a0.8,0.8 0 0 1 0.8,-0.8z" />
+        <path android:fillColor="#FFCBD5E1" android:pathData="M33.2,18.2h7.1a1.2,1.2 0 0 1 1.2,1.2v5.699999999999999a1.2,1.2 0 0 1 -1.2,1.2h-7.1a1.2,1.2 0 0 1 -1.2,-1.2v-5.699999999999999a1.2,1.2 0 0 1 1.2,-1.2z" />
+        <path android:fillColor="#FF0B1220" android:pathData="M35.2,20.5h3.8a0.6,0.6 0 0 1 0.6,0.6v2.3a0.6,0.6 0 0 1 -0.6,0.6h-3.8a0.6,0.6 0 0 1 -0.6,-0.6v-2.3a0.6,0.6 0 0 1 0.6,-0.6z" />
         <path android:fillColor="#FFFFFFFF" android:pathData="M8.2,22.25a1.4,1.4 0 1 0 2.8,0a1.4,1.4 0 1 0 -2.8,0z" />
     </group>
-    <group android:translateX="29" android:translateY="32" android:scaleX="0.78" android:scaleY="0.78" android:rotation="-135">
-        <group android:translateX="-24" android:translateY="-12.5">
-            <path android:fillColor="#FFFFFFFF" android:pathData="M24.0,16.0h0.0a1.7,1.7 0 0 1 1.7,1.7v20.6a1.7,1.7 0 0 1 -1.7,1.7h-0.0a1.7,1.7 0 0 1 -1.7,-1.7v-20.6a1.7,1.7 0 0 1 1.7,-1.7z" android:strokeColor="#FF15171C" android:strokeWidth="1.6" />
-            <path android:fillColor="#FFFFFFFF" android:pathData="M18.0,12.5a6.0,6.0 0 1 0 12.0,0a6.0,6.0 0 1 0 -12.0,0z" android:strokeColor="#FF15171C" android:strokeWidth="1.6" />
-            <path android:fillColor="#FF15171C" android:pathData="M22.8,5.2h2.4a0.8,0.8 0 0 1 0.8,0.8v5.0a0.8,0.8 0 0 1 -0.8,0.8h-2.4a0.8,0.8 0 0 1 -0.8,-0.8v-5.0a0.8,0.8 0 0 1 0.8,-0.8z" />
+    <group android:translateX="21" android:translateY="24" android:rotation="-45">
+        <group android:translateX="-24" android:translateY="-24">
+            <path android:fillColor="#FFF59E0B" android:pathData="M24.0,16.0h0.0a1.9,1.9 0 0 1 1.9,1.9v18.2a1.9,1.9 0 0 1 -1.9,1.9h-0.0a1.9,1.9 0 0 1 -1.9,-1.9v-18.2a1.9,1.9 0 0 1 1.9,-1.9z" android:strokeColor="#FF0B1220" android:strokeWidth="1.4" />
+            <path android:fillColor="#FFF59E0B" android:pathData="M17.8,12.5a6.2,6.2 0 1 0 12.4,0a6.2,6.2 0 1 0 -12.4,0z" android:strokeColor="#FF0B1220" android:strokeWidth="1.4" />
+            <path android:fillColor="#FF0B1220" android:pathData="M22.7,5.0h2.6a0.8,0.8 0 0 1 0.8,0.8v5.199999999999999a0.8,0.8 0 0 1 -0.8,0.8h-2.6a0.8,0.8 0 0 1 -0.8,-0.8v-5.199999999999999a0.8,0.8 0 0 1 0.8,-0.8z" />
         </group>
     </group>
 </vector>

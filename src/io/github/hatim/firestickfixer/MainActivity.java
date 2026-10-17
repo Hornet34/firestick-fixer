@@ -2438,7 +2438,7 @@ public class MainActivity extends Activity {
      * Round button on the right of the verbose row that opens the
      * full-screen diagnostic log. A "description" vector icon tinted via
      * the same color selector as the header info button and the target
-     * launch button (white normally, dark on the orange focus disc), so it stays
+     * launch button (white normally, dark on the teal focus disc), so it stays
      * crisp and consistent at any density.
      */
     private ImageView buildLogButton() {

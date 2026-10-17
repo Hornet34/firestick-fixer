@@ -49,7 +49,7 @@ public final class InfoDialog {
         // up from the OK button (OK, then device-info link, then repo link,
         // then the logo) lands here; activating it plays the loading animation
         // full-screen. No visible hint, so it stays a discovery, not a feature.
-        // Focus is shown by tinting the white logo brand orange (no background
+        // Focus is shown by tinting the white logo brand teal (no background
         // frame), reusing the same focus selector as the header buttons.
         ImageView dialogLogo = new ImageView(host);
         dialogLogo.setImageResource(R.drawable.ic_logo);

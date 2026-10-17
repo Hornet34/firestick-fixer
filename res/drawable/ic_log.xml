@@ -3,7 +3,7 @@
     "description" Material Symbol: a single sheet with text lines, used as
     the diagnostic-log button in the verbose row. fillColor is white so the
     icon tints cleanly via the info_button_text color selector (white
-    normally, dark on the orange focus disc), matching the round info and launch
+    normally, dark on the teal focus disc), matching the round info and launch
     buttons. Path is Google's Material Icons "description" at 24dp.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
