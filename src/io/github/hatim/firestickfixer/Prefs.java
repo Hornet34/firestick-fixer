@@ -100,7 +100,7 @@ public class Prefs {
      * keep production logs clean.
      */
     public boolean isVerboseLogging() {
-        return sp.getBoolean(KEY_VERBOSE, true); // PROBE BUILD ONLY
+        return sp.getBoolean(KEY_VERBOSE, false);
     }
 
     public void setVerboseLogging(boolean enabled) {
@@ -113,7 +113,7 @@ public class Prefs {
      * FireStick Fixer without having to navigate to its tile.
      */
     public boolean isMenuLongPressLaunch() {
-        return sp.getBoolean(KEY_MENU_LP, true);
+        return sp.getBoolean(KEY_MENU_LP, false); // no longer offered in the UI
     }
 
     public void setMenuLongPressLaunch(boolean enabled) {

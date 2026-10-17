@@ -1,23 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    Background for full-row-focusable switch rows. Empty by default,
-    fills brand-tinted on focus / pressed so d-pad navigation is
-    obvious across the whole row width (not just at the toggle).
--->
+<!-- Full-row focus: rounded teal-tinted fill with an accent outline, so the focused
+     row is obvious from the sofa. Transparent when idle (the card shows through). -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
             <solid android:color="@color/row_pressed" />
+            <corners android:radius="10dp" />
         </shape>
     </item>
     <item android:state_focused="true">
         <shape android:shape="rectangle">
             <solid android:color="@color/brand_highlight" />
+            <stroke android:width="2dp" android:color="@color/brand" />
+            <corners android:radius="10dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
             <solid android:color="@android:color/transparent" />
+            <corners android:radius="10dp" />
         </shape>
     </item>
 </selector>

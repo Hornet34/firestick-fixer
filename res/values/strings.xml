@@ -16,7 +16,7 @@
     </string>
 
     <!-- Target row -->
-    <string name="target_picker_tip">Choose which app to launch in place of the Fire TV home. Long-press opens the selected app\'s system info page.</string>
+    <string name="target_picker_tip">Your launcher: the app ⌂ Home takes you to. Press OK to choose it. Long-press OK opens its system info page.</string>
     <string name="target_none">Choose target app…</string>
     <string name="target_not_installed_suffix"> - not installed</string>
     <string name="target_picker_emoji">📂</string>
@@ -28,8 +28,8 @@
     <!-- Switches -->
     <string name="switch_accessibility">Accessibility service (required)</string>
     <string name="switch_accessibility_tip">Required for everything else in this app to work. This permission has to be granted only once via adb:\nadb shell pm grant io.github.hatim.firestickfixer android.permission.WRITE_SECURE_SETTINGS\nFrom a phone shell app there is no adb: run just the pm grant part, without the adb shell prefix.</string>
-    <string name="switch_hijack">Replace ⌂ Home button</string>
-    <string name="switch_hijack_tip">Pressing ⌂ Home from any third-party app opens the target app instead of the Amazon home screen.\nDouble-press ⌂ Home about a second apart, or long-press it, in the target app to escape to the Amazon home screen if needed.\nPress ↩ Back or ◉ OK while the Home icon on the Amazon home screen is focused to open the target app.</string>
+    <string name="switch_hijack">⌂ Home opens my launcher</string>
+    <string name="switch_hijack_tip">A single press of ⌂ Home, from any app or from the Amazon home screen, opens your launcher instead of Amazon\'s home.\nDouble-tap ⌂ Home to stay on the Amazon home screen; a single press later takes you back to your launcher.</string>
     <string name="switch_hijack_tip_fos7">Pressing ⌂ Home from any third-party app opens the target app instead of the Amazon home screen.\nOn Fire OS 7 the system holds a Home press for up to 5 seconds; a loading animation covers the wait. A mapped launcher button that sends its own key code opens instantly instead.\nDouble-press ⌂ Home about a second apart, or long-press it, in the target app to escape to the Amazon home screen if needed.\nPress ↩ Back or ◉ OK while the Home icon on the Amazon home screen is focused to open the target app.</string>
     <!-- Fire OS 7 only: what covers Amazon home during the ~5 s Home delay
          (shown on the right of the Replace Home row). -->
@@ -39,19 +39,19 @@
     <string name="mask_cover_tip">On Fire OS 7 the system holds a ⌂ Home press for up to 5 seconds. This chooses what covers Amazon home during the wait. Animation plays a short loading scene. Black screen shows a plain black screen with a loading message. Fire OS 8 has no delay, so nothing is shown. Hold ◉ OK to preview the current choice.</string>
 
     <!-- Escape gestures, shown as a sub-row under Replace Home. Both default to on. -->
-    <string name="escape_label">Escape to Amazon home:</string>
+    <string name="escape_label"></string>
     <string name="escape_long_label">Long-press</string>
-    <string name="escape_double_label">Double-press</string>
+    <string name="escape_double_label">Double-tap → Amazon home</string>
     <string name="escape_long_box_tip">Hold ⌂ Home to switch between your launcher and the Amazon home screen. Turn this off if you would rather see the panel that a long press opens, with its profile, sleep and mirroring tiles. Some remotes have a settings button that opens the very same panel, and FireStick Fixer cannot tell the two apart, so turning this off also stops that button from switching launchers. Press ◉ OK to switch it on or off.</string>
-    <string name="escape_double_box_tip">Press ⌂ Home twice, about a second apart, to stay on the Amazon home screen instead of being sent back to your launcher. Turn this off if you often press ⌂ Home repeatedly and end up on Amazon home by accident. Press ◉ OK to switch it on or off.</string>
+    <string name="escape_double_box_tip">Double-tap ⌂ Home to stay on the Amazon home screen. A single press of ⌂ Home later brings your launcher back. Turn this off if you never want to see Amazon\'s home. Press OK to switch it on or off.</string>
 
-    <string name="switch_boot">Launch on boot</string>
-    <string name="switch_boot_tip">Open the target app automatically when the device boots or wakes from standby.</string>
+    <string name="switch_boot">Open an app at start-up</string>
+    <string name="switch_boot_tip">Opens an app automatically when the Fire TV starts or wakes from standby. Move right to choose which app: your launcher (default) or any other app.</string>
     <string name="switch_menu_lp">☰ Menu long-press opens this config screen</string>
     <string name="switch_menu_lp_tip">Hold the ☰ Menu button for half a second to open this config screen.</string>
     <!-- Instant launcher shortcuts: reach the target without going through the
          Home button, so on Fire OS 7 they skip the app-switch delay. -->
-    <string name="launch_key_label">Map custom buttons</string>
+    <string name="launch_key_label">Remap remote buttons</string>
     <string name="launch_key_launcher_label">Launcher:</string>
     <string name="launch_key_amazon_label">Amazon home:</string>
     <string name="launch_key_tip">Map spare remote buttons: one for your target launcher, one for the Amazon home screen, Custom for any number of further apps. Buttons with their own key code (● ● ● ●, numbers, channel, subtitles, teletext, ⏪ ⏵ ⏩) switch instantly. Buttons that open an app (⊞ Apps, 📺 Live TV, Netflix) can only be redirected, which is slightly slower and may flash briefly.</string>
@@ -103,8 +103,8 @@
     <string name="key_forward">Fast-forward</string>
     <string name="key_number">Number %1$d</string>
 
-    <string name="switch_verbose">Verbose logging (for debugging)</string>
-    <string name="switch_verbose_tip">Logs every key and window event the accessibility service receives, tagged HomeOnFire. View on-device with the button on the right, or with:\nadb logcat -s HomeOnFire</string>
+    <string name="switch_verbose">Diagnostic logging</string>
+    <string name="switch_verbose_tip">Logs every key and window event the service receives, tagged FireStickFixer. View it on the TV with the button on the right, or from a computer with:\nadb logcat -s FireStickFixer</string>
 
     <!-- Log viewer: round button in the verbose row + the full-screen view it opens. -->
     <string name="log_button_desc">Show diagnostic log</string>
@@ -128,7 +128,7 @@
     <!-- Info dialog -->
     <string name="info_dialog_version">Version %1$s</string>
     <string name="info_dialog_version_unknown">?</string>
-    <string name="info_dialog_description">Redirects the Fire TV ⌂ Home button to a launcher of your choice.</string>
+    <string name="info_dialog_description">Sends the Fire TV ⌂ Home button to the launcher you choose, and lets you remap the remote\'s app buttons.</string>
     <string name="info_dialog_ok">OK</string>
 
     <!-- Toasts -->
@@ -155,4 +155,21 @@
     <!-- Filled from Prefs.DEFAULT_MASK_GRACE / HOLD / FADE so it can never drift from the code. -->
     <string name="tuning_reset_tip">Restore start delay %1$d ms, end hold %2$d ms, fade %3$d ms.</string>
     <string name="tuning_reset_done">Timing reset to defaults</string>
+    <string name="section_home">Home button</string>
+    <string name="section_buttons">Remote buttons</string>
+    <string name="section_startup">Start-up</string>
+    <string name="section_system">System</string>
+    <string name="section_launcher">Your launcher</string>
+    <string name="switch_back_stays">Back does nothing on my launcher\'s main screen</string>
+    <string name="switch_back_stays_tip">Without this, ↩ Back on your launcher\'s main screen closes it and you briefly land on the Amazon home screen. Back inside the launcher\'s own menus and settings keeps working: FireStick Fixer recognises the main screen by its layout.</string>
+    <string name="precise_label">Precise button detection</string>
+    <string name="precise_on">Active</string>
+    <string name="precise_off">Off · one-time setup</string>
+    <string name="precise_tip_on">Active. FireStick Fixer sees every ⌂ Home press and every remote app button the moment the system handles it: Home goes straight to your launcher with no Amazon flash, double-tap is exact, and a remapped app button only fires for the button, not when you open that app yourself.</string>
+    <string name="precise_tip_off">Run once from a computer (survives reboots, read-only):\nadb shell pm grant io.github.hatim.firestickfixer android.permission.READ_LOGS\nThen switch the accessibility service off and on. Without it, FireStick Fixer falls back to slower window detection, and Amazon home can flash briefly on ⌂ Home.</string>
+    <string name="precise_toast">Run once via adb:\nadb shell pm grant io.github.hatim.firestickfixer android.permission.READ_LOGS</string>
+    <string name="boot_app_label">App:</string>
+    <string name="boot_app_same">My launcher</string>
+    <string name="boot_app_pick_title">App to open at start-up</string>
+    <string name="boot_app_tip">Which app opens at start-up. Pick your launcher to follow it, or any other app (for example a live TV or streaming app).</string>
 </resources>

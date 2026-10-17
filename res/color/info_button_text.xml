@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!--
-    Text color selector for the round info button. Inverts on focus
-    (white circle + dark text) so the glyph stays legible against the
-    light fill in the focused state.
--->
+<!-- Glyph color for the round buttons: white, dark navy on the teal focus disc. -->
 <selector xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:state_focused="true" android:color="@color/brand" />
+    <item android:state_focused="true" android:color="@color/bg_window" />
     <item android:color="@color/text_white" />
 </selector>

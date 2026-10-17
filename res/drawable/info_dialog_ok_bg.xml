@@ -10,19 +10,19 @@
     <item android:state_focused="true">
         <shape android:shape="rectangle">
             <solid android:color="@color/brand" />
-            <corners android:radius="4dp" />
+            <corners android:radius="10dp" />
         </shape>
     </item>
     <item android:state_pressed="true">
         <shape android:shape="rectangle">
             <solid android:color="@color/row_pressed" />
-            <corners android:radius="4dp" />
+            <corners android:radius="10dp" />
         </shape>
     </item>
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="#33FFFFFF" />
-            <corners android:radius="4dp" />
+            <solid android:color="@color/bg_field" />
+            <corners android:radius="10dp" />
         </shape>
     </item>
 </selector>

@@ -83,7 +83,7 @@ public class LogViewerActivity extends Activity {
     private LinearLayout buildTopBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setBackgroundColor(Colors.BRAND);
+        bar.setBackgroundColor(Colors.BAR);
         bar.setPadding(dp(24), dp(12), dp(24), dp(12));
         bar.setGravity(Gravity.CENTER_VERTICAL);
 

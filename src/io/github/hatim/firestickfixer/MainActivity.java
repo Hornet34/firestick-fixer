@@ -52,7 +52,12 @@ public class MainActivity extends Activity {
     /** Round launch button on the right of the target row. */
     private TextView launchBtn;
     private Switch accessSwitch, hijackSwitch, bootSwitch, verboseSwitch, menuLpSwitch,
-            launchKeyEnabledSwitch;
+            launchKeyEnabledSwitch, backStaySwitch;
+    /** Status row for the optional READ_LOGS grant, and its right-hand status text. */
+    private LinearLayout preciseRow;
+    private TextView preciseStatus;
+    /** Value box beside "Open an app at start-up": which app that is. */
+    private TextView bootAppBox;
 
     /** The map-custom-buttons switch-row (left half); pinned into the vertical focus chain. */
     private LinearLayout launchKeyRow;
@@ -165,7 +170,7 @@ public class MainActivity extends Activity {
     private static final String LIVETV_PKG = "com.amazon.tv.livetv";
 
     /** Vertical padding inside every settings row; kept small so more rows fit one screen. */
-    private static final int ROW_PAD_V = 8;
+    private static final int ROW_PAD_V = 9;
 
     /**
      * Horizontal padding inside a value box. Deliberately larger than {@link #ROW_PAD_V}:
@@ -226,8 +231,9 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         LinearLayout content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(32), dp(20), dp(32), dp(24));
+        content.setPadding(dp(32), dp(8), dp(32), dp(24));
 
+        content.addView(sectionHeading(getString(R.string.section_launcher)));
         content.addView(buildTargetRow(), targetRowLp());
         addSwitches(content);
         addTuningRows(content);
@@ -253,8 +259,32 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(16);
+        lp.bottomMargin = dp(4);
         return lp;
+    }
+
+    /** Small all-caps heading above a section card. */
+    private TextView sectionHeading(String text) {
+        TextView h = new TextView(this);
+        h.setText(text);
+        h.setAllCaps(true);
+        h.setTextSize(13);
+        h.setLetterSpacing(0.08f);
+        h.setTextColor(Colors.DIM);
+        h.setPadding(dp(8), dp(16), dp(8), dp(6));
+        return h;
+    }
+
+    /** Adds a heading plus a rounded card and returns the card, which takes the rows. */
+    private LinearLayout addCard(LinearLayout content, String title) {
+        content.addView(sectionHeading(title));
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(getDrawable(R.drawable.card_bg));
+        card.setPadding(dp(6), dp(6), dp(6), dp(6));
+        content.addView(card, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        return card;
     }
 
     /**
@@ -453,9 +483,10 @@ public class MainActivity extends Activity {
         return btn;
     }
 
-    /** Adds all switch rows in display order. */
+    /** Adds all settings rows, grouped into section cards, in display order. */
     private void addSwitches(LinearLayout content) {
-        accessSwitch = makeSwitchRow(content,
+        LinearLayout home = addCard(content, getString(R.string.section_home));
+        accessSwitch = makeSwitchRow(home,
                 getString(R.string.switch_accessibility),
                 getString(R.string.switch_accessibility_tip),
                 AccessibilityHelper.isOurServiceEnabled(this),
@@ -477,26 +508,166 @@ public class MainActivity extends Activity {
                         updateDependentSwitches();
                     }
                 });
-        addHomeRow(content);
-        // The custom-button mapping sits right under Replace Home. It also covers
-        // app-buttons like ⊞ Apps and Live TV (learned as screen redirects), which
-        // used to be a separate "Replace Apps button" switch.
-        addLaunchKeyRow(content);
-        bootSwitch = makeSwitchRow(content,
+        addHomeRow(home);
+        backStaySwitch = makeSwitchRow(home,
+                getString(R.string.switch_back_stays),
+                getString(R.string.switch_back_stays_tip),
+                prefs.isBackStaysOnLauncher(),
+                prefToggle(new PrefSetter() {
+                    @Override public void set(boolean v) { prefs.setBackStaysOnLauncher(v); }
+                }));
+
+        LinearLayout buttons = addCard(content, getString(R.string.section_buttons));
+        // The custom-button mapping also covers app-buttons like YouTube, ⊞ Apps and
+        // Live TV (learned as screen redirects).
+        addLaunchKeyRow(buttons);
+        addPreciseRow(buttons);
+
+        LinearLayout startup = addCard(content, getString(R.string.section_startup));
+        addBootRow(startup);
+
+        LinearLayout system = addCard(content, getString(R.string.section_system));
+        addVerboseRow(system);
+    }
+
+    /**
+     * "Open an app at start-up" switch with a value box on the right naming the app.
+     * The box opens the app picker; picking the launcher itself means "follow the
+     * launcher", so changing the launcher later carries the start-up app along.
+     */
+    private void addBootRow(LinearLayout card) {
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.HORIZONTAL);
+        outer.setGravity(Gravity.CENTER_VERTICAL);
+        bootSwitch = makeSwitchRow(outer,
                 getString(R.string.switch_boot),
                 getString(R.string.switch_boot_tip),
                 prefs.getLaunchOnBoot(),
                 prefToggle(new PrefSetter() {
-                    @Override public void set(boolean v) { prefs.setLaunchOnBoot(v); }
+                    @Override public void set(boolean v) {
+                        prefs.setLaunchOnBoot(v);
+                        updateBootBoxState();
+                    }
                 }));
-        menuLpSwitch = makeSwitchRow(content,
-                badgeKeys(getString(R.string.switch_menu_lp)),
-                getString(R.string.switch_menu_lp_tip),
-                prefs.isMenuLongPressLaunch(),
-                prefToggle(new PrefSetter() {
-                    @Override public void set(boolean v) { prefs.setMenuLongPressLaunch(v); }
-                }));
-        addVerboseRow(content);
+        View row = rowOf(bootSwitch);
+        // The row RIGHT-navigates to the app box, so it must not swallow RIGHT.
+        row.setOnKeyListener(null);
+        row.setLayoutParams(new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView label = new TextView(this);
+        label.setText(R.string.boot_app_label);
+        label.setTextSize(15);
+        label.setTextColor(Colors.NEUTRAL);
+        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        labelLp.leftMargin = dp(12);
+        labelLp.rightMargin = dp(6);
+        outer.addView(label, labelLp);
+
+        final TextView box = new TextView(this);
+        box.setTextSize(16);
+        box.setTextColor(Colors.WHITE);
+        box.setGravity(Gravity.CENTER);
+        box.setMinWidth(dp(56));
+        box.setMaxWidth(dp(320));
+        box.setSingleLine(true);
+        box.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        box.setPadding(dp(BOX_PAD_H), dp(ROW_PAD_V), dp(BOX_PAD_H), dp(ROW_PAD_V));
+        box.setBackground(getDrawable(R.drawable.target_chip_bg));
+        box.setFocusable(true);
+        box.setClickable(true);
+        box.setTag(label);
+        box.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                AppPicker.show(MainActivity.this, getString(R.string.boot_app_pick_title),
+                        new AppPicker.OnPicked() {
+                            @Override public void onPicked(String pkg) {
+                                // Picking the launcher means "follow the launcher".
+                                prefs.setBootApp(pkg != null
+                                        && pkg.equals(prefs.getTargetPackage()) ? "" : pkg);
+                                refreshBootBox();
+                            }
+                        });
+            }
+        });
+        box.setOnKeyListener(new RightNavGuard(null));
+        attachTip(box, getString(R.string.boot_app_tip));
+        outer.addView(box);
+        bootAppBox = box;
+        card.addView(outer);
+        refreshBootBox();
+    }
+
+    /** Shows the start-up app's name in its box ("My launcher" when it follows the launcher). */
+    private void refreshBootBox() {
+        if (bootAppBox == null) return;
+        String raw = prefs.getBootAppRaw();
+        bootAppBox.setText(raw == null || raw.isEmpty()
+                ? getString(R.string.boot_app_same) : appLabel(raw));
+    }
+
+    /** The start-up app box is usable only while the service and the switch are on. */
+    private void updateBootBoxState() {
+        if (bootAppBox == null) return;
+        boolean usable = accessSwitch.isChecked() && prefs.getLaunchOnBoot();
+        setBoxUsable(bootAppBox, usable, rowOf(bootSwitch));
+    }
+
+    /**
+     * Status row for the optional one-time READ_LOGS grant that enables precise Home and
+     * app-button detection. Not a switch (the grant can only be given over adb); OK shows
+     * the command when it is missing, the tip explains either state.
+     */
+    private void addPreciseRow(LinearLayout card) {
+        final LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setPadding(dp(16), dp(ROW_PAD_V + 4), dp(16), dp(ROW_PAD_V + 4));
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setFocusable(true);
+        row.setClickable(true);
+        row.setBackground(getDrawable(R.drawable.row_focus_bg));
+
+        TextView tv = new TextView(this);
+        tv.setText(R.string.precise_label);
+        tv.setTextSize(18);
+        tv.setTextColor(Colors.NEUTRAL);
+        row.addView(tv, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        preciseStatus = new TextView(this);
+        preciseStatus.setTextSize(15);
+        row.addView(preciseStatus);
+
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (!LogWatcher.isAvailable(MainActivity.this)) {
+                    Toast.makeText(MainActivity.this, R.string.precise_toast,
+                            Toast.LENGTH_LONG).show();
+                }
+            }
+        });
+        row.setOnKeyListener(new RightNavGuard(null));
+        row.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View view, boolean hasFocus) {
+                if (hasFocus && tipView != null) {
+                    tipView.setText(badgeKeys(getString(LogWatcher.isAvailable(MainActivity.this)
+                            ? R.string.precise_tip_on : R.string.precise_tip_off)));
+                }
+            }
+        });
+        preciseRow = row;
+        card.addView(row);
+    }
+
+    private void refreshPreciseRow() {
+        if (preciseStatus == null) return;
+        boolean on = LogWatcher.isAvailable(this);
+        preciseStatus.setText(on ? "● " + getString(R.string.precise_on)
+                : "● " + getString(R.string.precise_off));
+        preciseStatus.setTextColor(on ? Colors.BRAND : Colors.AMBER);
     }
 
     /**
@@ -587,11 +758,8 @@ public class MainActivity extends Activity {
         block.addView(caption, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        escapeLongPair = addTogglePair(block, getString(R.string.escape_long_label),
-                new BoolPref() {
-                    @Override public boolean get() { return prefs.isEscapeLongPress(); }
-                    @Override public void set(boolean v) { prefs.setEscapeLongPress(v); }
-                }, 0, R.string.escape_long_box_tip);
+        // The long-press escape is gone from the UI: the long-press panel's own tiles
+        // (profiles, sleep, mirroring) are worth more than a second escape gesture.
         escapeDoublePair = addTogglePair(block, getString(R.string.escape_double_label),
                 new BoolPref() {
                     @Override public boolean get() { return prefs.isEscapeDoublePress(); }
@@ -2177,7 +2345,7 @@ public class MainActivity extends Activity {
     private void wireVerticalNav() {
         View accessRow = rowOf(accessSwitch);
         View bootRow = rowOf(bootSwitch);
-        View menuRow = rowOf(menuLpSwitch);
+        View backRow = rowOf(backStaySwitch);
         ensureId(escapeLongPair);
         ensureId(escapeDoublePair);
         // The settings rows form one column on the left, with every right-hand control
@@ -2186,8 +2354,8 @@ public class MainActivity extends Activity {
         // control below inside its beam and then picks purely by weighted distance,
         // which lets a value box or an escape switch one line further down beat the row
         // directly underneath. The right-hand controls stay reachable via RIGHT.
-        View[] column = {initialFocus, accessRow, hijackRow, launchKeyRow, bootRow, menuRow,
-                verboseRow};
+        View[] column = {initialFocus, accessRow, hijackRow, backRow, launchKeyRow, preciseRow,
+                bootRow, verboseRow};
         for (View v : column) {
             ensureId(v);
         }
@@ -2207,12 +2375,12 @@ public class MainActivity extends Activity {
         for (View pair : new View[]{escapeLongPair, escapeDoublePair}) {
             if (pair == null) continue;
             if (accessRow != null) pair.setNextFocusUpId(accessRow.getId());
-            if (launchKeyRow != null) pair.setNextFocusDownId(launchKeyRow.getId());
+            if (backRow != null) pair.setNextFocusDownId(backRow.getId());
         }
         for (TextView box : new TextView[]{launcherBox, amazonBox, customBox}) {
             if (box == null) continue;
-            if (hijackRow != null) box.setNextFocusUpId(hijackRow.getId());
-            if (bootRow != null) box.setNextFocusDownId(bootRow.getId());
+            if (backRow != null) box.setNextFocusUpId(backRow.getId());
+            if (preciseRow != null) box.setNextFocusDownId(preciseRow.getId());
         }
         // Fire OS 7 loading-cover box on the Replace-Home row: the accessibility row is
         // above, the map-custom-buttons row below; reach it via RIGHT, leave via UP/DOWN.
@@ -2220,8 +2388,13 @@ public class MainActivity extends Activity {
             if (accessRow != null) coverBox.setNextFocusUpId(accessRow.getId());
             if (launchKeyRow != null) coverBox.setNextFocusDownId(launchKeyRow.getId());
         }
-        if (logBtn != null && menuRow != null) {
-            logBtn.setNextFocusUpId(menuRow.getId());
+        if (bootAppBox != null) {
+            ensureId(bootAppBox);
+            if (preciseRow != null) bootAppBox.setNextFocusUpId(preciseRow.getId());
+            if (verboseRow != null) bootAppBox.setNextFocusDownId(verboseRow.getId());
+        }
+        if (logBtn != null && bootRow != null) {
+            logBtn.setNextFocusUpId(bootRow.getId());
         }
     }
 
@@ -2312,7 +2485,7 @@ public class MainActivity extends Activity {
     private LinearLayout buildTipBox() {
         LinearLayout tipBox = new LinearLayout(this);
         tipBox.setBackgroundColor(Colors.TIP_BG);
-        tipBox.setPadding(dp(24), dp(12), dp(24), dp(12));
+        tipBox.setPadding(dp(32), dp(14), dp(32), dp(14));
         tipView = new TextView(this);
         tipView.setTextSize(16);
         tipView.setTextColor(Colors.NEUTRAL);
@@ -2408,18 +2581,24 @@ public class MainActivity extends Activity {
     private LinearLayout buildTopBar() {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setBackgroundColor(Colors.BRAND);
-        bar.setPadding(dp(24), dp(12), dp(24), dp(12));
+        bar.setBackgroundColor(Colors.BAR);
+        bar.setPadding(dp(32), dp(14), dp(32), dp(14));
         bar.setGravity(Gravity.CENTER_VERTICAL);
 
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.ic_logo);
-        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(36), dp(36));
-        logoLp.rightMargin = dp(12);
+        LinearLayout.LayoutParams logoLp = new LinearLayout.LayoutParams(dp(40), dp(40));
+        logoLp.rightMargin = dp(14);
         bar.addView(logo, logoLp);
 
         TextView title = new TextView(this);
-        title.setText(R.string.app_name);
+        // "FireStick" in white, "Fixer" in the accent: the same split as the banner.
+        android.text.SpannableString name = new android.text.SpannableString("FireStick Fixer");
+        name.setSpan(new android.text.style.ForegroundColorSpan(Colors.BRAND), 10, 15,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        name.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, 15,
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        title.setText(name);
         title.setTextSize(26);
         title.setTextColor(Colors.WHITE);
         // Title takes remaining width so the info button can sit at the
@@ -2564,6 +2743,8 @@ public class MainActivity extends Activity {
         refreshSwitches();
         updateDependentSwitches();
         updateCustomBox(); // an app behind a mapping may have been installed or removed
+        refreshBootBox();
+        refreshPreciseRow();
     }
 
     /**
@@ -2626,7 +2807,7 @@ public class MainActivity extends Activity {
             hijackSwitch.setChecked(prefs.isHijackEnabled());
             bootSwitch.setChecked(prefs.getLaunchOnBoot());
             verboseSwitch.setChecked(prefs.isVerboseLogging());
-            menuLpSwitch.setChecked(prefs.isMenuLongPressLaunch());
+            backStaySwitch.setChecked(prefs.isBackStaysOnLauncher());
             launchKeyEnabledSwitch.setChecked(prefs.isLaunchKeyEnabled());
         } finally {
             suppressSwitchEvents = false;
@@ -2662,7 +2843,8 @@ public class MainActivity extends Activity {
         setRowEnabled(hijackSwitch, accessOn);
         setRowEnabled(bootSwitch, accessOn);
         setRowEnabled(verboseSwitch, accessOn);
-        setRowEnabled(menuLpSwitch, accessOn);
+        setRowEnabled(backStaySwitch, accessOn);
+        updateBootBoxState();
         setRowEnabled(launchKeyEnabledSwitch, accessOn);
         // The value box is gated on both the service AND the shortcut toggle.
         updateLaunchKeyBoxState();
