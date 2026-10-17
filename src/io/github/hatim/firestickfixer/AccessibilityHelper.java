@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 toolicious
-package io.github.toolicious.homeonfire;
+package io.github.hatim.firestickfixer;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -19,7 +19,7 @@ import android.text.TextUtils;
  * a signature-level permission, so a regular app cannot grant it to itself
  * via runtime prompts. But it can be granted once via adb:
  *
- *     adb shell pm grant io.github.toolicious.homeonfire android.permission.WRITE_SECURE_SETTINGS
+ *     adb shell pm grant io.github.hatim.firestickfixer android.permission.WRITE_SECURE_SETTINGS
  *
  * With the grant in place, our app can self-(re)enable its accessibility
  * service if it ever gets disabled. Without the grant the app simply tells
@@ -28,11 +28,11 @@ import android.text.TextUtils;
 public class AccessibilityHelper {
 
     /** Short form used when writing the secure setting. */
-    public static final String SERVICE_ID = "io.github.toolicious.homeonfire/.HijackService";
+    public static final String SERVICE_ID = "io.github.hatim.firestickfixer/.HijackService";
 
     /** Fully qualified form Android may store after normalization. */
     public static final String SERVICE_ID_FULL =
-            "io.github.toolicious.homeonfire/io.github.toolicious.homeonfire.HijackService";
+            "io.github.hatim.firestickfixer/io.github.hatim.firestickfixer.HijackService";
 
     private static final String PERM_WRITE_SECURE_SETTINGS =
             "android.permission.WRITE_SECURE_SETTINGS";

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 toolicious
-package io.github.toolicious.homeonfire;
+package io.github.hatim.firestickfixer;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -110,7 +110,7 @@ public class Prefs {
     /**
      * When true, a long press of the remote's Menu key opens this
      * configuration app. Useful as a "from anywhere" shortcut into
-     * Home on Fire without having to navigate to its tile.
+     * FireStick Fixer without having to navigate to its tile.
      */
     public boolean isMenuLongPressLaunch() {
         return sp.getBoolean(KEY_MENU_LP, true);

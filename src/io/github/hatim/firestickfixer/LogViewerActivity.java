@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 toolicious
-package io.github.toolicious.homeonfire;
+package io.github.hatim.firestickfixer;
 
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
@@ -157,7 +157,7 @@ public class LogViewerActivity extends Activity {
         sec.setPadding(0, dp(18), 0, 0);
 
         TextView heading = new TextView(this);
-        heading.setText("Recent log (tag HomeOnFire)");
+        heading.setText("Recent log (tag " + HijackService.TAG + ")");
         heading.setTextSize(15);
         heading.setTextColor(DIM);
         heading.setPadding(dp(2), 0, 0, dp(8));
@@ -178,7 +178,7 @@ public class LogViewerActivity extends Activity {
             log.setLineSpacing(dp(2), 1f);
             log.setText(serviceBound
                     ? "No events captured yet. Press Home or open the target app, then reopen this screen."
-                    : "This Fire OS build blocks third-party accessibility services (shown as \"NOT BOUND\" above), so Home on Fire's Home-button redirect never starts and has nothing to record. This is an Amazon firmware restriction, not a missing setting or a bug, so there is nothing to enable or fix here.");
+                    : "This Fire OS build blocks third-party accessibility services (shown as \"NOT BOUND\" above), so FireStick Fixer's Home-button redirect never starts and has nothing to record. This is an Amazon firmware restriction, not a missing setting or a bug, so there is nothing to enable or fix here.");
         }
         sec.addView(log);
         return sec;
@@ -304,7 +304,7 @@ public class LogViewerActivity extends Activity {
         // Keep the newest lines while reading: a head cap would drop exactly those, and
         // holding the whole dump first costs memory for nothing.
         java.util.List<String> tail = AppInfo.runCmdTail(
-                new String[]{"logcat", "-d", "-v", "time", "HomeOnFire:V", "*:S"},
+                new String[]{"logcat", "-d", "-v", "time", HijackService.TAG + ":V", "*:S"},
                 MAX_LOG_LINES,
                 new AppInfo.LineFilter() {
                     @Override

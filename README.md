@@ -35,7 +35,7 @@ on current Fire OS 8.x (as of May 2026), and on Fire OS 7
 
 ![Home on Fire configuration screen](docs/screenshot.png)
 
-Package: `io.github.toolicious.homeonfire`
+Package: `io.github.hatim.firestickfixer`
 
 ---
 
@@ -62,7 +62,7 @@ on PATH):
 ```
 adb connect <fire-tv-ip>:5555
 adb install home-on-fire.apk
-adb shell pm grant io.github.toolicious.homeonfire android.permission.WRITE_SECURE_SETTINGS
+adb shell pm grant io.github.hatim.firestickfixer android.permission.WRITE_SECURE_SETTINGS
 ```
 
 **Set up on the TV:** open **Home on Fire**, flip the
@@ -289,13 +289,13 @@ is often broken (the reason you're on Path B). Granting
 service instead:
 
 ```
-adb shell pm grant io.github.toolicious.homeonfire android.permission.WRITE_SECURE_SETTINGS
+adb shell pm grant io.github.hatim.firestickfixer android.permission.WRITE_SECURE_SETTINGS
 ```
 
 One-shot grant, persists across reboots.
 
 > [!TIP]
-> Doing this from a phone instead of a PC? The apps that connect to the Fire TV and drop you into a shell prompt (not Termux) put you inside the device's own shell, so there is no `adb` command there. Run just the inner part, without the `adb shell` prefix: `pm grant io.github.toolicious.homeonfire android.permission.WRITE_SECURE_SETTINGS`
+> Doing this from a phone instead of a PC? The apps that connect to the Fire TV and drop you into a shell prompt (not Termux) put you inside the device's own shell, so there is no `adb` command there. Run just the inner part, without the `adb shell` prefix: `pm grant io.github.hatim.firestickfixer android.permission.WRITE_SECURE_SETTINGS`
 
 #### 6. Launch the app
 
@@ -303,7 +303,7 @@ Either open **Home on Fire** from the apps grid on the TV, or
 from the same terminal:
 
 ```
-adb shell am start -n io.github.toolicious.homeonfire/.MainActivity
+adb shell am start -n io.github.hatim.firestickfixer/.MainActivity
 ```
 
 #### 7. Pick a target app
@@ -329,10 +329,10 @@ adb install home-on-fire.apk
 
 # Grant the secure-settings permission, once, so the in-app
 # accessibility toggle works without the broken Settings page.
-adb shell pm grant io.github.toolicious.homeonfire android.permission.WRITE_SECURE_SETTINGS
+adb shell pm grant io.github.hatim.firestickfixer android.permission.WRITE_SECURE_SETTINGS
 
 # Open the app
-adb shell am start -n io.github.toolicious.homeonfire/.MainActivity
+adb shell am start -n io.github.hatim.firestickfixer/.MainActivity
 ```
 
 In the app, flip the **Accessibility service** switch and pick a

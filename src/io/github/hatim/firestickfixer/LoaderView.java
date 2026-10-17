@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 toolicious
-package io.github.toolicious.homeonfire;
+package io.github.hatim.firestickfixer;
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -133,7 +133,7 @@ public class LoaderView extends View {
     private String captionLoading = "LOADING…";
     private String captionReady = "READY";
 
-    /** House + "Home on Fire" wordmark drawn on the black screen; loaded lazily and mutated so its alpha stays local. */
+    /** House + "FireStick Fixer" wordmark drawn on the black screen; loaded lazily and mutated so its alpha stays local. */
     private android.graphics.drawable.Drawable wordmark;
 
     // Cached, design-space shaders (independent of view size).
@@ -510,7 +510,7 @@ public class LoaderView extends View {
         drawBrandMark(c, vw, vh, 0.50f); // more present here, where it is the only mark
     }
 
-    /** House + "Home on Fire" wordmark, centered near the bottom edge, kept subtle. */
+    /** House + "FireStick Fixer" wordmark, centered near the bottom edge, kept subtle. */
     private void drawBrandMark(Canvas c, int vw, int vh, float op) {
         if (wordmark == null) {
             android.graphics.drawable.Drawable d = getContext().getDrawable(R.drawable.ic_wordmark);

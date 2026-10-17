@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 toolicious
-package io.github.toolicious.homeonfire;
+package io.github.hatim.firestickfixer;
 
 import android.content.Context;
 import android.content.pm.PackageInfo;
@@ -73,7 +73,7 @@ final class AppInfo {
      * level the code branches on, and the hardware.
      */
     static String identity(Context ctx) {
-        return "Home on Fire " + versionName(ctx) + " (code " + versionCode(ctx) + ")"
+        return "FireStick Fixer " + versionName(ctx) + " (code " + versionCode(ctx) + ")"
                 + " | Fire OS " + fireOsVersion()
                 + " | Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + ")"
                 + " | " + Build.MODEL + " / " + Build.DEVICE;

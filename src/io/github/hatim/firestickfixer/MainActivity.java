@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 toolicious
-package io.github.toolicious.homeonfire;
+package io.github.hatim.firestickfixer;
 
 import android.app.Activity;
 import android.content.Intent;
@@ -19,7 +19,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 /**
- * Configuration UI of Home on Fire.
+ * Configuration UI of FireStick Fixer.
  *
  * Layout:
  *  - Brand-colored top bar with the app logo, name and a round info
@@ -1957,7 +1957,7 @@ public class MainActivity extends Activity {
                 // Stamp the build right where a tester starts reproducing,
                 // so the detailed lines that follow are never orphaned.
                 if (isChecked) {
-                    AppInfo.logIdentity(MainActivity.this, "HomeOnFire", "Verbose logging on");
+                    AppInfo.logIdentity(MainActivity.this, HijackService.TAG, "Verbose logging on");
                 }
                 updateLogButtonVisibility();
             }

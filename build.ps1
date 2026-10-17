@@ -73,7 +73,7 @@ $KeystoreDir  = Join-Path $ProjectRoot '..\..\_signing'
 $Keystore     = Join-Path $KeystoreDir 'home-on-fire.keystore'
 $Manifest     = Join-Path $ProjectRoot 'AndroidManifest.xml'
 $OutApk       = Join-Path $ProjectRoot 'home-on-fire.apk'
-$Package      = 'io.github.toolicious.homeonfire'
+$Package      = 'io.github.hatim.firestickfixer'
 
 if (-not (Test-Path $Keystore)) {
     throw "Keystore not found at $Keystore. Generate one with `keytool -genkey` or restore yours."

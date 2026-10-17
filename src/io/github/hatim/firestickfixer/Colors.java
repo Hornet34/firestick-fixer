@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 toolicious
-package io.github.toolicious.homeonfire;
+package io.github.hatim.firestickfixer;
 
 /**
  * Color constants for the programmatically-built UI. Mirrors the
@@ -11,7 +11,7 @@ public final class Colors {
 
     private Colors() {}
 
-    /** Mirrors {@code @color/brand}. Home on Fire red. */
+    /** Mirrors {@code @color/brand}. FireStick Fixer red. */
     public static final int BRAND = 0xFFB61414;
 
     /** Mirrors {@code @color/text_white}. */

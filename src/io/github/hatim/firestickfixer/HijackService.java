@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 toolicious
-package io.github.toolicious.homeonfire;
+package io.github.hatim.firestickfixer;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.ComponentName;
@@ -69,7 +69,7 @@ import android.view.accessibility.AccessibilityNodeInfo;
 @SuppressWarnings("deprecation")
 public class HijackService extends AccessibilityService {
 
-    static final String TAG = "HomeOnFire";
+    static final String TAG = "FireStickFixer";
 
     /** Package whose foreground appearance we want to intercept. */
     private static final String AMAZON_LAUNCHER = "com.amazon.tv.launcher";
@@ -84,7 +84,7 @@ public class HijackService extends AccessibilityService {
 
     /**
      * Amazon Kids home shell, shown inside a child profile. A child profile is its own
-     * Android user with separate app storage and secure settings, so Home on Fire only
+     * Android user with separate app storage and secure settings, so FireStick Fixer only
      * runs there if it was installed AND its accessibility service enabled for that user.
      * Both are deliberate acts, which is why this needs no extra opt-in switch.
      *
@@ -2442,7 +2442,7 @@ public class HijackService extends AccessibilityService {
             Intent intent = new Intent(this, MainActivity.class);
             intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
-            Log.i(TAG, "Long-press Menu. Opened Home on Fire");
+            Log.i(TAG, "Long-press Menu. Opened FireStick Fixer");
         } catch (Exception e) {
             Log.e(TAG, "Failed to open self", e);
         }
@@ -2479,7 +2479,7 @@ public class HijackService extends AccessibilityService {
     /**
      * True where the Android app-switch delay exists: API &lt;= 28, i.e. Fire OS 7 and
      * older. Fire OS 8 (API 30) has no such delay and is excluded. Kept at &lt;= 28 rather
-     * than == 28 in case some Fire OS 6 variant runs the app, but note that Home on Fire
+     * than == 28 in case some Fire OS 6 variant runs the app, but note that FireStick Fixer
      * likely does not work on Fire OS 6 at all for unrelated reasons (accessibility
      * restrictions), so in practice this gates the masking to Fire OS 7.
      */
