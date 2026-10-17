@@ -1,31 +1,33 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    Canonical color palette (FireStick Fixer "midnight + teal"). Colors.java mirrors
+    Canonical color palette (FireStick Fixer "graphite + Fire orange"). Colors.java mirrors
     the values the Java-built UI needs; keep both in sync. Drawables and the AppTheme
     reference these names directly.
 -->
 <resources>
     <!-- Accent: switches, focus outlines, highlights. -->
-    <color name="brand">#FF2DD4BF</color>
-    <color name="brand_dark">#FF0F766E</color>
+    <color name="brand">#FFFF8A00</color>
+    <color name="brand_dark">#FFCC6E00</color>
     <!-- Second accent for the logo's "fix" bolt and warnings. -->
-    <color name="amber">#FFF59E0B</color>
+    <color name="amber">#FFFBBF24</color>
     <!-- Translucent accent for focused rows and ripples. -->
-    <color name="brand_highlight">#332DD4BF</color>
-    <color name="row_pressed">#552DD4BF</color>
+    <color name="brand_highlight">#33FF8A00</color>
+    <color name="row_pressed">#55FF8A00</color>
 
-    <color name="bg_window">#FF0B1220</color>
-    <color name="bg_bar">#FF0F172A</color>
-    <color name="bg_card">#FF141D2F</color>
-    <color name="bg_field">#FF1E293B</color>
-    <color name="stroke_field">#FF334155</color>
-    <color name="surface_tip_box">#FF0F172A</color>
+    <color name="bg_window">#FF111317</color>
+    <color name="bg_bar">#FF17191E</color>
+    <color name="bg_card">#FF1C1F26</color>
+    <color name="bg_field">#FF262A33</color>
+    <color name="stroke_field">#FF3A3F4B</color>
+    <color name="surface_tip_box">#FF17191E</color>
 
-    <color name="text_neutral">#FFCBD5E1</color>
-    <color name="text_dim">#FF94A3B8</color>
+    <color name="text_neutral">#FFE5E7EB</color>
+    <color name="text_dim">#FF9CA3AF</color>
     <color name="text_white">#FFFFFFFF</color>
 
-    <color name="info_btn_idle">#FF1E293B</color>
-    <color name="info_btn_pressed">#FF0F766E</color>
-    <color name="info_btn_focused">#FF2DD4BF</color>
+    <color name="info_btn_idle">#FF262A33</color>
+    <color name="info_btn_pressed">#FFCC6E00</color>
+    <color name="info_btn_focused">#FFFF8A00</color>
+    <!-- "All good" status (precise detection active, updates blocked). -->
+    <color name="ok_green">#FF4ADE80</color>
 </resources>

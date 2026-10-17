@@ -744,10 +744,8 @@ public class HijackService extends AccessibilityService {
         if (target == null || target.isEmpty() || learned == null) return false;
         String now = currentTargetSignature(target);
         boolean swallow = learned.equals(now);
-        if (prefs.isVerboseLogging()) {
-            RingLog.i(TAG, "Back in launcher: screen=" + now + (swallow
-                    ? " is the main screen, ignoring Back" : " is not the main screen, passing"));
-        }
+        RingLog.i(TAG, "Back in launcher: screen=" + now + (swallow
+                ? " is the main screen, ignoring Back" : " is not the main screen, passing"));
         return swallow;
     }
 
@@ -1078,6 +1076,13 @@ public class HijackService extends AccessibilityService {
         }
     }
 
+    /** Apps on the user's "keep Alexa's results" list are never handed a voice search. */
+    private boolean keepsAlexaResults(String app) {
+        if (app == null || !prefs.isAlexaResultsApp(app)) return false;
+        RingLog.i(TAG, "Voice search: " + app + " is set to use Alexa's results");
+        return true;
+    }
+
     /** Remembers the last ordinary app in front (not Amazon's shell, Alexa or us). */
     private void trackUserApp(String pkg, String cls) {
         if (pkg == null || !isRealContentClass(cls)) return;
@@ -1113,10 +1118,7 @@ public class HijackService extends AccessibilityService {
         final String app = lastUserApp;
         RingLog.i(TAG, "Alexa search page up; app before it: " + app + " ("
                 + (System.currentTimeMillis() - lastUserAppAt) + "ms ago)");
-        if (app != null && prefs.isAlexaResultsApp(app)) {
-            RingLog.i(TAG, "Voice search: " + app + " is set to use Alexa's results");
-            return;
-        }
+        if (keepsAlexaResults(app)) return;
         if (app == null || System.currentTimeMillis() - lastUserAppAt > VOICE_ORIGIN_MAX_AGE_MS) {
             return;
         }
@@ -1256,7 +1258,7 @@ public class HijackService extends AccessibilityService {
         android.widget.LinearLayout col = new android.widget.LinearLayout(this);
         col.setOrientation(android.widget.LinearLayout.VERTICAL);
         col.setGravity(Gravity.CENTER);
-        col.setBackgroundColor(0xF20B1220);
+        col.setBackgroundColor(0xF2111317);
         android.widget.ImageView icon = new android.widget.ImageView(this);
         try {
             icon.setImageDrawable(getPackageManager().getApplicationIcon(app));
@@ -1272,7 +1274,7 @@ public class HijackService extends AccessibilityService {
         col.addView(title);
         voicePanelQuery = new android.widget.TextView(this);
         voicePanelQuery.setText(R.string.voice_panel_listening);
-        voicePanelQuery.setTextColor(0xFF2DD4BF);
+        voicePanelQuery.setTextColor(0xFFFF8A00);
         voicePanelQuery.setTextSize(30);
         voicePanelQuery.setGravity(Gravity.CENTER);
         col.addView(voicePanelQuery);
@@ -1280,7 +1282,7 @@ public class HijackService extends AccessibilityService {
                 android.R.attr.progressBarStyleHorizontal);
         voicePanelBar.setMax(1000);
         voicePanelBar.setProgress(0);
-        voicePanelBar.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFF2DD4BF));
+        voicePanelBar.setProgressTintList(android.content.res.ColorStateList.valueOf(0xFFFF8A00));
         android.widget.LinearLayout.LayoutParams barLp = new android.widget.LinearLayout.LayoutParams(
                 (int) (420 * d), (int) (8 * d));
         barLp.topMargin = (int) (28 * d);
@@ -1288,7 +1290,7 @@ public class HijackService extends AccessibilityService {
         android.widget.TextView hint = new android.widget.TextView(this);
         hint.setText(R.string.voice_panel_hint);
         voicePanelHint = hint;
-        hint.setTextColor(0xFF94A3B8);
+        hint.setTextColor(0xFF9CA3AF);
         hint.setTextSize(18);
         hint.setGravity(Gravity.CENTER);
         hint.setPadding(0, (int) (24 * d), 0, 0);
@@ -4386,6 +4388,7 @@ public class HijackService extends AccessibilityService {
 
     /** Runs the voice hand-off for {@code app} as if Alexa had heard {@code query}. */
     void testVoice(String app, String query) {
+        if (keepsAlexaResults(app)) return;
         testNoAlexaPage = true;
         lastUserApp = app;
         lastUserAppAt = System.currentTimeMillis();

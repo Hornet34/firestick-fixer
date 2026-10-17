@@ -44,6 +44,25 @@ check() { # check <name> <detail> <command...>
   if "$@"; then result "$name" PASS "$detail"; else result "$name" FAIL "$detail (front: $(fg))"; fi
 }
 
+# ---- settings: every feature on for the run, the user's settings back afterwards ----
+SWITCHES=(hijack doubleTap backStays backHold remap voice)
+declare -A ORIGINAL
+snapshot_and_enable() {
+  local sw
+  for sw in "${SWITCHES[@]}"; do
+    ORIGINAL[$sw]=$(state "$sw")
+    [[ "${ORIGINAL[$sw]}" == "true" ]] || hook set "$sw" true >/dev/null
+  done
+}
+restore_settings() {
+  local sw
+  for sw in "${!ORIGINAL[@]}"; do
+    [[ -n "${ORIGINAL[$sw]}" ]] && hook set "$sw" "${ORIGINAL[$sw]}" >/dev/null
+  done
+  [[ -n "${ALEXA_TEMP:-}" ]] && hook alexaApp "$ALEXA_TEMP" >/dev/null
+  echo "Settings restored: $(for sw in "${SWITCHES[@]}"; do printf '%s=%s ' "$sw" "$(state "$sw")"; done)"
+}
+
 # ---- environment -----------------------------------------------------------------
 TARGET=$(state target)
 TEST_APP=""
@@ -59,20 +78,17 @@ t_service() {
 }
 
 t_home_from_app() {
-  [[ "$(state hijack)" != "true" ]] && { result home_from_app SKIP "'Home opens my launcher' is off"; return; }
   [[ -z "$TEST_APP" ]] && { result home_from_app SKIP "no test app installed"; return; }
   open_app "$TEST_APP"; wait_fg "$TEST_APP" 8; home
   check home_from_app "Home in $TEST_APP opens $TARGET" wait_fg "$TARGET" 5
 }
 
 t_home_from_launcher() {
-  [[ "$(state hijack)" != "true" ]] && { result home_from_launcher SKIP "'Home opens my launcher' is off"; return; }
   home; sleep 2; home
   check home_from_launcher "Home on the launcher stays on $TARGET" wait_fg "$TARGET" 5
 }
 
 t_double_tap() {
-  [[ "$(state hijack)" != "true" ]] && { result double_tap SKIP "'Home opens my launcher' is off"; return; }
   wait_fg "$TARGET" 5; sleep 1
   sh_ input keyevent KEYCODE_HOME KEYCODE_HOME   # one input call: ~40 ms apart
   sleep 3
@@ -85,32 +101,27 @@ t_double_tap() {
 }
 
 t_single_after_escape() {
-  [[ "$(state hijack)" != "true" ]] && { result single_after_escape SKIP "'Home opens my launcher' is off"; return; }
   home
   check single_after_escape "single Home after the escape returns to $TARGET" wait_fg "$TARGET" 5
 }
 
+stays_in_front() { wait_fg "$1" 10 && sleep 2 && [[ "$(fg)" == "$1" ]]; }
 back_was_ignored() { hook log | grep 'is the main screen, ignoring Back' >/dev/null && [[ "$(fg)" == "$TARGET" ]]; }
 
 t_back_on_launcher() {
-  [[ "$(state backStays)" != "true" ]] && { result back_on_launcher SKIP "switched off"; return; }
   home; wait_fg "$TARGET" 5; sleep 2.5; hook clearlog >/dev/null
   hook key BACK tap >/dev/null; sleep 1
   check back_on_launcher "Back on the launcher's main screen is ignored" back_was_ignored
 }
 
 t_hold_back() {
-  [[ "$(state backHold)" != "true" ]] && { result hold_back SKIP "switched off"; return; }
   [[ -z "$TEST_APP" ]] && { result hold_back SKIP "no test app"; return; }
   open_app "$TEST_APP"; wait_fg "$TEST_APP" 8; sleep 1; hook clearlog >/dev/null
-  hook key BACK hold >/dev/null
-  # Leaves for the active home: the launcher while the Home redirect is on, else Amazon's.
-  local home_pkg=$TARGET; [[ "$(state hijack)" != "true" ]] && home_pkg=$AMAZON_HOME
-  check hold_back "holding Back in $TEST_APP closes it to $home_pkg" wait_fg "$home_pkg" 5
+  hook key BACK hold >/dev/null; sleep 1.5
+  check hold_back "holding Back in $TEST_APP closes it to $TARGET" wait_fg "$TARGET" 5
 }
 
 t_short_back() {
-  [[ "$(state backHold)" != "true" ]] && { result short_back SKIP "hold-Back off"; return; }
   [[ -z "$TEST_APP" ]] && { result short_back SKIP "no test app"; return; }
   open_app "$TEST_APP"; wait_fg "$TEST_APP" 8; sleep 1; hook clearlog >/dev/null
   hook key BACK tap >/dev/null
@@ -118,15 +129,15 @@ t_short_back() {
 }
 
 t_buttons() {
-  [[ "$(state remap)" != "true" || -z "$MAPS" ]] && { result button_remap SKIP "no custom mappings"; return; }
+  [[ -z "$MAPS" ]] && { result button_remap SKIP "no custom mappings configured"; return; }
   local m win app
   for m in $MAPS; do
     win=${m%%->*}; win=${win%%/*}; app=${m##*->}
     installed "$win" && installed "$app" || { result "button:$win" SKIP "app not installed"; continue; }
     # Opening the branded app yourself must leave it alone ...
     home; wait_fg "$TARGET" 5; open_app "$win"
-    sleep 4
-    check "manual_open:${win##*.}" "opening $win yourself is left alone" test "$(fg)" == "$win"
+    # A cold start (the app may have been stopped after an earlier remap) can take >4 s.
+    check "manual_open:${win##*.}" "opening $win yourself is left alone" stays_in_front "$win"
     # ... while its remote button opens the mapped app.
     home; wait_fg "$TARGET" 5
     hook button "$win" >/dev/null; open_app "$win"
@@ -135,7 +146,6 @@ t_buttons() {
 }
 
 t_voice() {
-  [[ "$(state voice)" != "true" ]] && { result voice SKIP "switched off"; return; }
   local app
   for app in io.gh.reisxd.tizentube.cobalt com.amazon.firetv.youtube com.nuvio.tv; do
     installed "$app" || continue
@@ -146,11 +156,34 @@ t_voice() {
   done
 }
 
+t_voice_keep_alexa() {
+  local app=io.gh.reisxd.tizentube.cobalt
+  installed "$app" || { result voice_back_keeps SKIP "TizenTube not installed"; return; }
+  home; wait_fg "$TARGET" 5; open_app "$app"; wait_fg "$app" 10; sleep 2; hook clearlog >/dev/null
+  hook voice "$app" lofi music >/dev/null; sleep 0.6
+  hook key BACK tap >/dev/null
+  check voice_back_keeps "Back during the countdown keeps Alexa's results" wait_log "kept Alexa's results" 3
+}
+
+t_alexa_list() {
+  local app=io.gh.reisxd.tizentube.cobalt
+  installed "$app" || { result alexa_list SKIP "TizenTube not installed"; return; }
+  [[ "$(hook alexaApp "$app")" == *listed=true* ]] || hook alexaApp "$app" >/dev/null
+  ALEXA_TEMP=$app; hook clearlog >/dev/null
+  hook voice "$app" lofi music >/dev/null
+  check alexa_list "an app on the Alexa list keeps Alexa's results" wait_log "is set to use Alexa's results" 3
+  hook alexaApp "$app" >/dev/null; ALEXA_TEMP=""
+}
+
 ALL=(service home_from_app home_from_launcher double_tap single_after_escape back_on_launcher
-     hold_back short_back buttons voice)
+     hold_back short_back buttons voice voice_keep_alexa alexa_list)
 if [[ "${1:-}" == "--list" ]]; then printf '%s\n' "${ALL[@]}"; exit 0; fi
 TESTS=("$@"); [[ ${#TESTS[@]} -eq 0 ]] && TESTS=("${ALL[@]}")
 
+snapshot_and_enable
+trap 'restore_settings' EXIT
+trap 'exit 130' INT TERM
+echo "Features switched on for this run (restored at the end)."
 echo "FireStick Fixer device test — $(sh_ getprop ro.build.version.name), launcher: $TARGET, test app: ${TEST_APP:-none}"
 echo "---------------------------------------------------------------------"
 for t in "${TESTS[@]}"; do "t_$t"; done

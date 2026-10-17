@@ -28,7 +28,7 @@ So the app reacts to what those keys *cause* instead. Three signal sources:
 | `MainActivity.java` | The settings screen (built in code, no XML layouts). Remote-only navigation with explicit focus wiring. |
 | `Prefs.java` | All settings (SharedPreferences). |
 | `BootReceiver.java` | Fallback for the start-up app (Fire OS delivers `BOOT_COMPLETED` ~1 min late; the service normally handles boot first). |
-| `TestHooks.java` | Commands reachable only via `adb shell dumpsys activity service …` (shell-only `DUMP` permission), used by `tools/device-test.sh`. |
+| `TestHooks.java` | Commands reachable only via `adb shell dumpsys activity service …` (shell-only `DUMP` permission), used by `tools/device-test.sh`: state, log, synthetic Back presses, voice and button simulation, feature switches. They run on the app's main thread (where dumpsys requests arrive), so they never wait on it. |
 | `RingLog.java` | In-memory copy of the service's log (Fire OS keeps app logcat for ~14 s). Read with `dumpsys` (no arguments). |
 | `AppPicker`, `TargetPickerActivity`, `CustomMap`, `KeyBadges`, `InfoDialog`, `LogViewerActivity` | Pickers, mapping model, key-badge text, about dialog and on-device log viewer (inherited from Home on Fire, restyled). |
 | `LoaderView`, `LoaderPreviewActivity` | Fire OS 7 loading animation (unused on Fire OS 8). |

@@ -10,9 +10,10 @@ tools/device-test.sh --list     # test names
 tools/device-test.sh voice      # one test
 ```
 
-It presses Home, opens and closes apps, and reports PASS / FAIL / SKIP per check. It
-changes no settings and ends on your launcher. Tests for switched-off features are
-skipped, not failed.
+It presses Home, opens and closes apps, and reports PASS / FAIL / SKIP per check. Every
+feature is tested, including switched-off ones: the script turns all feature switches on
+for the run and **restores your exact settings at the end** (also after a failure or
+Ctrl-C), then prints them. It ends on your launcher.
 
 | Test | What it proves |
 |---|---|
@@ -26,6 +27,8 @@ skipped, not failed.
 | `short_back` | A short Back still reaches the app |
 | `buttons` | Per mapping: opening the app yourself is left alone; its button opens the mapped app |
 | `voice` | Voice hand-off runs in TizenTube, YouTube and Nuvio (if installed) |
+| `voice_keep_alexa` | Back during the countdown keeps Alexa's results |
+| `alexa_list` | An app on "Apps that keep Alexa's results" is not handed the search |
 
 How it reaches what adb can't: remote keys injected with `adb shell input` never pass
 through an accessibility service's key filter, and Alexa's page can't be opened by adb.

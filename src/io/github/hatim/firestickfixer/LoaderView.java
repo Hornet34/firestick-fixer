@@ -510,15 +510,15 @@ public class LoaderView extends View {
         drawBrandMark(c, vw, vh, 0.50f); // more present here, where it is the only mark
     }
 
-    /** House + "FireStick Fixer" wordmark, centered near the bottom edge, kept subtle. */
+    /** FireStick Fixer mark (stick and wrench), centered near the bottom edge, kept subtle. */
     private void drawBrandMark(Canvas c, int vw, int vh, float op) {
         if (wordmark == null) {
             android.graphics.drawable.Drawable d = getContext().getDrawable(R.drawable.ic_wordmark);
             if (d != null) wordmark = d.mutate();
         }
         if (wordmark == null) return;
-        float h = Math.max(vh * 0.075f, 50f); // subtle but legible
-        float w = h * (1528f / 800f);         // ic_wordmark viewport aspect
+        float h = Math.max(vh * 0.11f, 64f); // subtle but legible
+        float w = h;                          // ic_wordmark is square
         int left = Math.round((vw - w) / 2f);
         int bottom = Math.round(vh - Math.max(vh * 0.055f, 34f));
         wordmark.setBounds(left, Math.round(bottom - h), Math.round(left + w), bottom);

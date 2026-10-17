@@ -925,7 +925,7 @@ public class MainActivity extends Activity {
         String changed = prefs.getOsChangedFrom();
         updatesStatus.setText("● " + getString(blocked ? R.string.updates_blocked : R.string.updates_auto)
                 + (changed.isEmpty() ? "" : "  · " + getString(R.string.updates_changed, changed)));
-        updatesStatus.setTextColor(blocked ? Colors.BRAND : Colors.AMBER);
+        updatesStatus.setTextColor(blocked ? Colors.OK : Colors.AMBER);
     }
 
     private void refreshPreciseRow() {
@@ -933,7 +933,7 @@ public class MainActivity extends Activity {
         boolean on = LogWatcher.isAvailable(this);
         preciseStatus.setText(on ? "● " + getString(R.string.precise_on)
                 : "● " + getString(R.string.precise_off));
-        preciseStatus.setTextColor(on ? Colors.BRAND : Colors.AMBER);
+        preciseStatus.setTextColor(on ? Colors.OK : Colors.AMBER);
     }
 
     /**
@@ -2438,7 +2438,7 @@ public class MainActivity extends Activity {
      * Round button on the right of the verbose row that opens the
      * full-screen diagnostic log. A "description" vector icon tinted via
      * the same color selector as the header info button and the target
-     * launch button (white normally, brand red on focus), so it stays
+     * launch button (white normally, dark on the orange focus disc), so it stays
      * crisp and consistent at any density.
      */
     private ImageView buildLogButton() {

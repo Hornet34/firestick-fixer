@@ -151,9 +151,24 @@ made. Dates are 2026. Test device throughout: Fire TV Stick AFTMA08C15, Fire OS 
   Never ftv-smtv.ntp-fireos.com (clock).
 
 ### D21 — Look and logo (Oct 17–18)
-- Midnight navy + teal, cards per section, one-line description under every setting.
+- (Superseded by D22.) Midnight navy + teal, cards per section, one-line description under every setting.
 - Logo: a home outline with an amber arrow leaving it — "Home, redirected", the app's core
   promise. Banner tagline: "Home goes where you want."
+
+### D22 — Logo: a Fire TV Stick with a wrench, not Amazon's logo (Oct 18)
+- **Request:** use the Amazon Fire TV logo, modified.
+- **Decision:** an original drawing of the Fire TV Stick itself (orange HDMI dongle with
+  its plug) with a wrench on it. Copying Amazon's logo or wordmark, even modified, would
+  suggest Amazon made or endorses the app (trademark) and risks takedowns of the repo.
+- **UI follows the logo:** graphite background, Fire orange accent, green for "all good",
+  yellow for "needs attention"; tagline "Your Fire TV, your rules."
+
+### D23 — Test every feature, even switched-off ones (Oct 18, owner's rule)
+- **Decision:** `tools/device-test.sh` records the six feature switches, turns all on,
+  tests, and restores them on exit (also on failure or Ctrl-C) via the `set` test hook.
+- **Found by it right away:** two harness bugs, not app bugs. `dumpsys` runs on the app's
+  main thread, so a hook that waited for the main thread deadlocked; and a check relied
+  on a log line only written in diagnostic mode (now always logged).
 
 ## Known limits (by design, not bugs)
 - Amazon's own home screen content (ads, rows) can't be changed without root.
