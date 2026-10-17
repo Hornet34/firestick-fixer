@@ -274,6 +274,7 @@ public class HijackService extends AccessibilityService {
             }
         }
         registerScreenOnReceiver();
+        attachCover();
         logWatcher = new LogWatcher(this, mainHandler, logListener);
         logWatcher.start();
         maybeLaunchAtBoot();
@@ -322,7 +323,7 @@ public class HijackService extends AccessibilityService {
         if (!prefs.getLaunchOnBoot()) return;
         // Waking the TV is a fresh start: an escape from before standby no longer holds.
         stayOnAmazonHome = false;
-        final String target = prefs.getTargetPackage();
+        final String target = prefs.getBootApp();
         if (target == null || target.isEmpty()) return;
         if (mainHandler == null) {
             mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -425,6 +426,8 @@ public class HijackService extends AccessibilityService {
     /** App the last remote app button opened, and when (from the log). */
     private String lastButtonPkg = null;
     private long lastButtonAt = 0L;
+    /** Cap for the cover put up on a Home press, in case the launcher sends no event. */
+    private static final long HOME_COVER_MAX_MS = 1_500L;
     /** Two Home presses this close (by the system's own start log) are a double-press. */
     private static final long PRECISE_DOUBLE_PRESS_MS = 900L;
     /** How long after a button's log line its app's window still counts as that press. */
@@ -480,21 +483,42 @@ public class HijackService extends AccessibilityService {
             Log.i(TAG, "Home press #" + homePressSeq + " (log), "
                     + (prevHomePressAt == 0L ? "first" : (at - prevHomePressAt) + "ms after the last"));
         }
-        if (!prefs.isHijackEnabled() || !prefs.isEscapeDoublePress()) return;
-        if (prevHomePressAt == 0L || at - prevHomePressAt >= PRECISE_DOUBLE_PRESS_MS) return;
-        lastHomePressAt = 0L; // a third quick press starts over instead of re-escaping
-        enterEscape("double-press Home");
+        if (!prefs.isHijackEnabled()) return;
         final String target = prefs.getTargetPackage();
-        if (mainHandler == null || target == null) return;
-        mainHandler.postDelayed(new Runnable() {
-            @Override public void run() {
-                if (stayOnAmazonHome && target.equals(currentForegroundPackage())) {
-                    ownHomeDispatchAt = System.currentTimeMillis();
-                    performGlobalAction(GLOBAL_ACTION_HOME);
-                    Log.i(TAG, "Double-press landed under the launcher, back to Amazon home");
+        if (target == null || target.isEmpty() || target.equals(getPackageName())) return;
+
+        boolean doublePress = prefs.isEscapeDoublePress() && prevHomePressAt != 0L
+                && at - prevHomePressAt < PRECISE_DOUBLE_PRESS_MS;
+        if (doublePress) {
+            lastHomePressAt = 0L; // a third quick press starts over instead of re-escaping
+            hideButtonCover();
+            enterEscape("double-press Home");
+            // The first press already started the launcher; if it lands after this
+            // press's Amazon home, put Amazon home back in front.
+            Runnable check = new Runnable() {
+                @Override public void run() {
+                    if (stayOnAmazonHome && target.equals(currentForegroundPackage())) {
+                        ownHomeDispatchAt = System.currentTimeMillis();
+                        performGlobalAction(GLOBAL_ACTION_HOME);
+                        Log.i(TAG, "Double-press landed under the launcher, back to Amazon home");
+                    }
                 }
-            }
-        }, 700L);
+            };
+            mainHandler.postDelayed(check, 350L);
+            mainHandler.postDelayed(check, 900L);
+            return;
+        }
+
+        // A single press always means "my launcher", also right after an escape.
+        stayOnAmazonHome = false;
+        hijackedForHomeSeq = homePressSeq;
+        if (System.currentTimeMillis() < bypassUntil) return;
+        // The window event got here first and already redirected this press.
+        if (System.currentTimeMillis() - lastHijackAt < 600L) return;
+        // The log line lands before Amazon home has painted, so covering the screen and
+        // starting the launcher now means Amazon home never shows.
+        showButtonCover(target, HOME_COVER_MAX_MS);
+        launchTarget(target, "Home press");
     }
 
     /**
@@ -549,12 +573,12 @@ public class HijackService extends AccessibilityService {
     private void maybeLaunchAtBoot() {
         if (android.os.SystemClock.elapsedRealtime() > BOOT_WINDOW_MS) return;
         if (!prefs.isHijackEnabled() || !prefs.getLaunchOnBoot()) return;
-        String target = prefs.getTargetPackage();
-        if (target == null || target.isEmpty() || target.equals(getPackageName())) return;
+        String app = prefs.getBootApp();
+        if (app == null || app.isEmpty() || app.equals(getPackageName())) return;
         String fg = currentForegroundPackage();
         if (fg != null && !AMAZON_LAUNCHER.equals(fg)) return;
-        showButtonCover(target);
-        launchTarget(target, "Service up right after boot", false);
+        showButtonCover(app);
+        launchTarget(app, "Service up right after boot", false);
     }
 
     /** Outermost scrolling container of a window, as "class@bounds", or null. */
@@ -953,7 +977,7 @@ public class HijackService extends AccessibilityService {
             targetShownAt = System.currentTimeMillis();
         }
         maybeClearEscape(pkgStr, clsStr);
-        if (buttonCover != null && pkgStr != null && pkgStr.equals(buttonCoverFor)
+        if (buttonCoverFor != null && pkgStr != null && pkgStr.equals(buttonCoverFor)
                 && isRealContentClass(clsStr)) {
             hideButtonCoverSoon();
         }
@@ -1394,6 +1418,16 @@ public class HijackService extends AccessibilityService {
         // stranding the user on Amazon home.
         boolean backSinceHijack = lastKeyCode == KeyEvent.KEYCODE_BACK
                 && lastKeyTime > lastHijackAt;
+        if (preciseMode() && scan != null && scan.pkg != null
+                && !AMAZON_LAUNCHER.equals(scan.pkg) && !KIDS_LAUNCHER.equals(scan.pkg)) {
+            // Amazon's launcher also reports itself while it sits behind another app
+            // (measured: 4.8 s after a Home press that had already been redirected). The
+            // screen belongs to someone else, so there is nothing to redirect.
+            if (prefs.isVerboseLogging()) {
+                Log.i(TAG, "Amazon home event while " + scan.pkg + " is in front, ignored");
+            }
+            return;
+        }
         if (preciseMode()) {
             // The log counts Home presses exactly (and handles the double-press there),
             // so the only thing to decide here is whether this arrival belongs to a
@@ -1432,8 +1466,12 @@ public class HijackService extends AccessibilityService {
     }
 
     private void redirectHome(String target, String prev, boolean backSinceHijack) {
-        // The launcher closed itself on Back: cover Amazon home while it comes back.
-        if (backSinceHijack && target.equals(prev)) showButtonCover(target);
+        // Backed out of an app (or the launcher) onto Amazon home: cover it while the
+        // launcher comes back.
+        if (lastKeyCode == KeyEvent.KEYCODE_BACK
+                && System.currentTimeMillis() - lastKeyTime < 1_500L) {
+            showButtonCover(target, HOME_COVER_MAX_MS);
+        }
         hijackedForHomeSeq = homePressSeq;
         // lastHijackAt is armed inside launchTarget on success.
         launchTarget(target, "Redirected Home (from " + prev + ")");
@@ -1560,7 +1598,7 @@ public class HijackService extends AccessibilityService {
         // Nothing to re-assert after a launch that never happened (target uninstalled).
         // TASK_ON_HOME: Back from the mapped app's root returns to home (and from there
         // to the target launcher), never to the branded app still sitting underneath.
-        if (!launchTarget(appToLaunch, reason, false, Intent.FLAG_ACTIVITY_TASK_ON_HOME)) {
+        if (!launchMappedApp(appToLaunch, reason)) {
             hideButtonCover();
             return;
         }
@@ -1628,6 +1666,45 @@ public class HijackService extends AccessibilityService {
         }, 2_500L);
     }
 
+    /**
+     * Starts a mapped app so that Back out of it lands on the target launcher: the
+     * launcher is brought up first (hidden under the cover), then the mapped app on top.
+     * The branded app the button opened (YouTube) thereby ends up BELOW the launcher, so
+     * Back neither reopens it nor passes through Amazon home. Without a target launcher
+     * the mapped app goes on top of home instead (FLAG_ACTIVITY_TASK_ON_HOME), which is
+     * then the right place to return to.
+     */
+    private boolean launchMappedApp(String app, String reason) {
+        String target = prefs.getTargetPackage();
+        boolean haveLauncher = target != null && !target.isEmpty()
+                && !target.equals(app) && !target.equals(getPackageName())
+                && prefs.isHijackEnabled();
+        if (haveLauncher) {
+            Intent under = launchIntentFor(target);
+            if (under != null) {
+                try {
+                    startActivity(under);
+                } catch (Exception e) {
+                    haveLauncher = false;
+                }
+            } else {
+                haveLauncher = false;
+            }
+        }
+        return launchTarget(app, reason, false,
+                haveLauncher ? 0 : Intent.FLAG_ACTIVITY_TASK_ON_HOME);
+    }
+
+    /** Launch intent for a package, Leanback entry first, or null. */
+    private Intent launchIntentFor(String pkg) {
+        PackageManager pm = getPackageManager();
+        Intent i = pm.getLeanbackLaunchIntentForPackage(pkg);
+        if (i == null) i = pm.getLaunchIntentForPackage(pkg);
+        if (i == null) return null;
+        i.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        return i;
+    }
+
     private void cancelPendingReassert() {
         if (pendingReassert != null && mainHandler != null) {
             mainHandler.removeCallbacks(pendingReassert);
@@ -1641,26 +1718,53 @@ public class HijackService extends AccessibilityService {
      * still goes to the app underneath; the hard cap means it can never strand.
      */
     private void showButtonCover(String forPkg) {
+        showButtonCover(forPkg, BUTTON_COVER_MAX_MS);
+    }
+
+    private void showButtonCover(String forPkg, long maxMs) {
         if (windowManager == null || mainHandler == null) return;
         buttonCoverFor = forPkg;
-        if (buttonCover == null) {
-            try {
-                android.view.View v = new android.view.View(this);
-                v.setBackgroundColor(0xFF000000);
-                windowManager.addView(v, maskLayoutParams());
-                buttonCover = v;
-                Log.i(TAG, "Covering the button's app while " + forPkg + " starts");
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to show button cover", e);
-                buttonCover = null;
-                return;
-            }
-        }
+        if (buttonCover == null) attachCover();
+        if (buttonCover == null) return;
+        buttonCover.setVisibility(android.view.View.VISIBLE);
+        if (prefs.isVerboseLogging()) Log.i(TAG, "Screen covered while " + forPkg + " starts");
         if (buttonCoverCap != null) mainHandler.removeCallbacks(buttonCoverCap);
         buttonCoverCap = new Runnable() {
             @Override public void run() { hideButtonCover(); }
         };
-        mainHandler.postDelayed(buttonCoverCap, BUTTON_COVER_MAX_MS);
+        mainHandler.postDelayed(buttonCoverCap, maxMs);
+    }
+
+    /**
+     * Adds the cover window once, hidden. Creating and adding a window costs ~200 ms
+     * the first time, which is longer than Amazon home takes to paint; toggling the
+     * visibility of an attached one takes a frame.
+     */
+    private void attachCover() {
+        if (buttonCover != null || windowManager == null) return;
+        try {
+            android.view.View v = new android.view.View(this);
+            v.setBackgroundColor(0xFF000000);
+            v.setVisibility(android.view.View.GONE);
+            windowManager.addView(v, maskLayoutParams());
+            buttonCover = v;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to attach the cover", e);
+            buttonCover = null;
+        }
+    }
+
+    /** Removes the cover window for good (service going away). */
+    private void detachCover() {
+        hideButtonCover();
+        if (buttonCover != null) {
+            try {
+                if (windowManager != null) windowManager.removeView(buttonCover);
+            } catch (Exception ignored) {
+                // already detached
+            }
+            buttonCover = null;
+        }
     }
 
     /** The mapped app is up: lift the cover once it has had a moment to paint. */
@@ -1679,14 +1783,7 @@ public class HijackService extends AccessibilityService {
         }
         buttonCoverCap = null;
         buttonCoverFor = null;
-        if (buttonCover != null) {
-            try {
-                if (windowManager != null) windowManager.removeView(buttonCover);
-            } catch (Exception ignored) {
-                // already detached
-            }
-            buttonCover = null;
-        }
+        if (buttonCover != null) buttonCover.setVisibility(android.view.View.GONE);
     }
 
     /** As {@link #handleWindowLaunch} but the slot's action is "go to Amazon home". */
@@ -2837,7 +2934,7 @@ public class HijackService extends AccessibilityService {
         }
         consumedDownKey = -1;
         cancelMask();
-        hideButtonCover();
+        detachCover();
         if (logWatcher != null) logWatcher.stop();
         if (screenOnReceiver != null) {
             try {

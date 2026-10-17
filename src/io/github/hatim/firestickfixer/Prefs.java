@@ -195,6 +195,27 @@ public class Prefs {
         sp.edit().putBoolean(KEY_ESCAPE_LONGPRESS, enabled).apply();
     }
 
+    private static final String KEY_BOOT_APP = "boot_app";
+
+    /**
+     * App opened at boot and on wake from standby. Empty means the target launcher,
+     * which is also the fallback when the chosen app has been uninstalled.
+     */
+    public String getBootApp() {
+        String app = sp.getString(KEY_BOOT_APP, "");
+        if (app != null && !app.isEmpty()) return app;
+        return getTargetPackage();
+    }
+
+    /** The explicitly chosen boot app, or "" when it follows the target launcher. */
+    public String getBootAppRaw() {
+        return sp.getString(KEY_BOOT_APP, "");
+    }
+
+    public void setBootApp(String pkg) {
+        sp.edit().putString(KEY_BOOT_APP, pkg == null ? "" : pkg).apply();
+    }
+
     private static final String KEY_BACK_STAYS = "back_stays_on_launcher";
 
     /**

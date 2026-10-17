@@ -35,7 +35,7 @@ public class BootReceiver extends BroadcastReceiver {
         // no boot launch happens.
         if (!AccessibilityHelper.isOurServiceEnabled(ctx)) return;
 
-        String target = prefs.getTargetPackage();
+        String target = prefs.getBootApp();
         if (target == null || target.isEmpty()) return;
 
         PackageManager pm = ctx.getPackageManager();
