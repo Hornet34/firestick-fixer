@@ -274,6 +274,9 @@ public class HijackService extends AccessibilityService {
             }
         }
         registerScreenOnReceiver();
+        logWatcher = new LogWatcher(this, mainHandler, logListener);
+        logWatcher.start();
+        maybeLaunchAtBoot();
         // Delayed so whatever is on screen has finished building its tree.
         mainHandler.postDelayed(new Runnable() {
             @Override public void run() { logSectionProbe(); }
@@ -411,12 +414,221 @@ public class HijackService extends AccessibilityService {
      * opens a real app (see {@link #maybeClearEscape}) or we launch the target ourselves.
      */
     private volatile boolean stayOnAmazonHome = false;
+    /** Precise Home / button detection from the system log, when READ_LOGS is granted. */
+    private LogWatcher logWatcher;
+    private long lastHomePressAt = 0L;
+    private long prevHomePressAt = 0L;
+    private int homePressSeq = 0;
+    private int hijackedForHomeSeq = -1;
+    /** When we dispatched GLOBAL_ACTION_HOME ourselves, so its log line is not a press. */
+    private long ownHomeDispatchAt = 0L;
+    /** App the last remote app button opened, and when (from the log). */
+    private String lastButtonPkg = null;
+    private long lastButtonAt = 0L;
+    /** Two Home presses this close (by the system's own start log) are a double-press. */
+    private static final long PRECISE_DOUBLE_PRESS_MS = 900L;
+    /** How long after a button's log line its app's window still counts as that press. */
+    private static final long BUTTON_EVIDENCE_MS = 5_000L;
+    /**
+     * Without the log: an OK this recent before a mapped app's window means the user
+     * opened that app themselves (from a launcher row), not via its remote button. App
+     * buttons never reach us as keys, so a button press leaves no recent OK behind.
+     */
+    private static final long MANUAL_OPEN_OK_WINDOW_MS = 3_000L;
+    /** Uptime below which a fresh service connect counts as "just booted". */
+    private static final long BOOT_WINDOW_MS = 120_000L;
+    /**
+     * Layout fingerprint of the target launcher's main screen (its outermost scrolling
+     * container, class and bounds), learned whenever the launcher comes up fresh. Used to
+     * tell "Back on the main screen" (swallow it) from "Back in one of the launcher's own
+     * menus" (let it through): Flutter and Compose launchers draw menus in the same
+     * window but drop the screen underneath from the accessibility tree.
+     */
+    private volatile String targetRootSignature = null;
+    private Runnable rootSignatureCapture = null;
+    private static final long ROOT_SIGNATURE_DELAY_MS = 1_200L;
+
     /** When the target launcher last reported real content in front. */
     private volatile long targetShownAt = 0L;
     private volatile long stayOnAmazonSince = 0L;
 
     /** Grace after an escape during which window events cannot clear it (hand-off noise). */
     private static final long ESCAPE_SETTLE_MS = 1_500L;
+
+    private final LogWatcher.Listener logListener = new LogWatcher.Listener() {
+        @Override public void onHomePress(long at) { handleHomePressFromLog(at); }
+        @Override public void onButtonLaunch(String button, String pkg, long at) {
+            handleButtonFromLog(button, pkg, at);
+        }
+    };
+
+    private boolean preciseMode() {
+        return logWatcher != null && logWatcher.isRunning();
+    }
+
+    /**
+     * One call per real Home press. A second press soon after the first is the
+     * double-press escape: leave the user on Amazon home and make it stick, pushing it
+     * back in front if our redirect from the first press landed after the second.
+     */
+    private void handleHomePressFromLog(long at) {
+        if (at - ownHomeDispatchAt < 800L) return; // our own GLOBAL_ACTION_HOME
+        prevHomePressAt = lastHomePressAt;
+        lastHomePressAt = at;
+        homePressSeq++;
+        if (prefs.isVerboseLogging()) {
+            Log.i(TAG, "Home press #" + homePressSeq + " (log), "
+                    + (prevHomePressAt == 0L ? "first" : (at - prevHomePressAt) + "ms after the last"));
+        }
+        if (!prefs.isHijackEnabled() || !prefs.isEscapeDoublePress()) return;
+        if (prevHomePressAt == 0L || at - prevHomePressAt >= PRECISE_DOUBLE_PRESS_MS) return;
+        lastHomePressAt = 0L; // a third quick press starts over instead of re-escaping
+        enterEscape("double-press Home");
+        final String target = prefs.getTargetPackage();
+        if (mainHandler == null || target == null) return;
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (stayOnAmazonHome && target.equals(currentForegroundPackage())) {
+                    ownHomeDispatchAt = System.currentTimeMillis();
+                    performGlobalAction(GLOBAL_ACTION_HOME);
+                    Log.i(TAG, "Double-press landed under the launcher, back to Amazon home");
+                }
+            }
+        }, 700L);
+    }
+
+    /**
+     * A remote app button opened {@code pkg}. If a mapping covers that app, launch the
+     * mapped app right now, before the button's app has painted, instead of waiting
+     * for its window. The window event that follows is then just a duplicate.
+     */
+    private void handleButtonFromLog(String button, String pkg, long at) {
+        lastButtonPkg = pkg;
+        lastButtonAt = at;
+        if (prefs.isVerboseLogging()) Log.i(TAG, "Remote button " + button + " opened " + pkg);
+        if (!prefs.isLaunchKeyEnabled()) return;
+        if (windowMatches(pkg, null, prefs.getLaunchWindow())) {
+            handleWindowLaunch(pkg);
+        } else if (windowMatches(pkg, null, prefs.getAmazonWindow())) {
+            handleWindowAmazon();
+        } else {
+            String app = customAppForWindow(pkg, null);
+            if (app != null) handleWindowLaunch(pkg, app, "Remote button " + button);
+        }
+    }
+
+    /**
+     * Whether a mapped app's window comes from its remote button rather than from the
+     * user opening the app. Precise with the log; otherwise a recent OK means a manual
+     * open, since app buttons never reach us as keys.
+     */
+    private boolean openedByButton(String pkg, long now) {
+        if (AMAZON_APPS_GRID.equals(pkg)) return true; // the Apps grid has its own rules
+        if (preciseMode()) {
+            return pkg.equals(lastButtonPkg) && now - lastButtonAt < BUTTON_EVIDENCE_MS;
+        }
+        boolean recentOk = (lastKeyCode == KeyEvent.KEYCODE_DPAD_CENTER
+                || lastKeyCode == KeyEvent.KEYCODE_ENTER)
+                && now - lastKeyTime < MANUAL_OPEN_OK_WINDOW_MS;
+        return !recentOk;
+    }
+
+    /** True when the user just backed out of {@code app} onto {@code brandedPkg}. */
+    private boolean backingOutOf(String brandedPkg, String app, long now) {
+        String cameFrom = brandedPkg.equals(currentForegroundPkg)
+                ? previousForegroundPkg : currentForegroundPkg;
+        return app != null && app.equals(cameFrom) && lastKeyCode == KeyEvent.KEYCODE_BACK
+                && now - lastKeyTime < BACK_OUT_WINDOW_MS;
+    }
+
+    /**
+     * Right after boot the service connects while Amazon home is (or is about to be) on
+     * screen; BOOT_COMPLETED arrives seconds later. Launch the target now and cover the
+     * screen until it paints, so the device comes up on the launcher, not Amazon home.
+     */
+    private void maybeLaunchAtBoot() {
+        if (android.os.SystemClock.elapsedRealtime() > BOOT_WINDOW_MS) return;
+        if (!prefs.isHijackEnabled() || !prefs.getLaunchOnBoot()) return;
+        String target = prefs.getTargetPackage();
+        if (target == null || target.isEmpty() || target.equals(getPackageName())) return;
+        String fg = currentForegroundPackage();
+        if (fg != null && !AMAZON_LAUNCHER.equals(fg)) return;
+        showButtonCover(target);
+        launchTarget(target, "Service up right after boot", false);
+    }
+
+    /** Outermost scrolling container of a window, as "class@bounds", or null. */
+    private static String scrollSignature(AccessibilityNodeInfo node, int depth) {
+        if (node == null || depth > SECTION_SCAN_MAX_DEPTH) return null;
+        CharSequence cls = node.getClassName();
+        if (node.isScrollable() || (cls != null && cls.toString().endsWith("ScrollView")
+                && !cls.toString().endsWith("HorizontalScrollView"))) {
+            android.graphics.Rect b = new android.graphics.Rect();
+            node.getBoundsInScreen(b);
+            return cls + "@" + b.flattenToString();
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo c = node.getChild(i);
+            if (c == null) continue;
+            try {
+                String sig = scrollSignature(c, depth + 1);
+                if (sig != null) return sig;
+            } finally {
+                c.recycle();
+            }
+        }
+        return null;
+    }
+
+    /** Signature of the target's screen if the target owns the active window, else null. */
+    private String currentTargetSignature(String target) {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return null;
+        try {
+            CharSequence pkg = root.getPackageName();
+            if (pkg == null || !target.equals(pkg.toString())) return null;
+            return scrollSignature(root, 0);
+        } catch (Exception e) {
+            return null;
+        } finally {
+            root.recycle();
+        }
+    }
+
+    /** Learns the main-screen fingerprint once the freshly shown launcher has settled. */
+    private void scheduleRootSignatureCapture(final String target) {
+        if (mainHandler == null) return;
+        if (rootSignatureCapture != null) mainHandler.removeCallbacks(rootSignatureCapture);
+        final long scheduledAt = System.currentTimeMillis();
+        rootSignatureCapture = new Runnable() {
+            @Override public void run() {
+                rootSignatureCapture = null;
+                // Any key since: the user may already have opened a menu. Skip this round.
+                if (lastKeyTime > scheduledAt) return;
+                String sig = currentTargetSignature(target);
+                if (sig != null && !sig.equals(targetRootSignature)) {
+                    targetRootSignature = sig;
+                    Log.i(TAG, "Launcher main screen learned: " + sig);
+                }
+            }
+        };
+        mainHandler.postDelayed(rootSignatureCapture, ROOT_SIGNATURE_DELAY_MS);
+    }
+
+    /** Back on the target's main screen: swallow it, there is nothing behind the launcher. */
+    private boolean shouldSwallowBackInTarget() {
+        if (!prefs.isHijackEnabled() || !prefs.isBackStaysOnLauncher()) return false;
+        String target = prefs.getTargetPackage();
+        String learned = targetRootSignature;
+        if (target == null || target.isEmpty() || learned == null) return false;
+        String now = currentTargetSignature(target);
+        boolean swallow = learned.equals(now);
+        if (prefs.isVerboseLogging()) {
+            Log.i(TAG, "Back in launcher: screen=" + now + (swallow
+                    ? " is the main screen, ignoring Back" : " is not the main screen, passing"));
+        }
+        return swallow;
+    }
 
     private void enterEscape(String why) {
         stayOnAmazonHome = true;
@@ -735,6 +947,9 @@ public class HijackService extends AccessibilityService {
 
         if (pkgStr != null && isRealContentClass(clsStr)
                 && pkgStr.equals(prefs.getTargetPackage())) {
+            if (System.currentTimeMillis() - targetShownAt > 2_000L) {
+                scheduleRootSignatureCapture(pkgStr);
+            }
             targetShownAt = System.currentTimeMillis();
         }
         maybeClearEscape(pkgStr, clsStr);
@@ -799,17 +1014,24 @@ public class HijackService extends AccessibilityService {
                         + " mapEnabled=" + mapOn + " launch=" + matchLaunch
                         + " amazon=" + matchAmazon + " launchWin=" + launchWin);
             }
-            if (mapOn && matchLaunch) {
-                handleWindowLaunch(pkgStr);
-                return;
-            }
-            if (mapOn && matchAmazon) {
-                handleWindowAmazon();
-                return;
-            }
-            if (mapOn) {
-                String customApp = customAppForWindow(pkgStr, clsStr);
-                if (customApp != null) {
+            String customApp = mapOn && !matchLaunch && !matchAmazon
+                    ? customAppForWindow(pkgStr, clsStr) : null;
+            if (mapOn && (matchLaunch || matchAmazon || customApp != null)) {
+                long now = System.currentTimeMillis();
+                String mappedTo = matchLaunch ? prefs.getTargetPackage() : customApp;
+                // Opened by the user (launcher row, voice, recents) rather than by its
+                // remote button: leave the app alone. Only the button is remapped.
+                if (!openedByButton(pkgStr, now) && !backingOutOf(pkgStr, mappedTo, now)) {
+                    if (prefs.isVerboseLogging()) {
+                        Log.i(TAG, pkgStr + " opened directly, not by its button: left alone");
+                    }
+                } else if (matchLaunch) {
+                    handleWindowLaunch(pkgStr);
+                    return;
+                } else if (matchAmazon) {
+                    handleWindowAmazon();
+                    return;
+                } else {
                     handleWindowLaunch(pkgStr, customApp, "Redirect from custom button");
                     return;
                 }
@@ -1172,6 +1394,20 @@ public class HijackService extends AccessibilityService {
         // stranding the user on Amazon home.
         boolean backSinceHijack = lastKeyCode == KeyEvent.KEYCODE_BACK
                 && lastKeyTime > lastHijackAt;
+        if (preciseMode()) {
+            // The log counts Home presses exactly (and handles the double-press there),
+            // so the only thing to decide here is whether this arrival belongs to a
+            // press we already redirected.
+            if (!backSinceHijack && homePressSeq == hijackedForHomeSeq
+                    && now - lastHijackAt < DOUBLE_PRESS_WINDOW_MS) {
+                if (prefs.isVerboseLogging()) {
+                    Log.i(TAG, "Auto-hijack skipped: repeat event of Home press #" + homePressSeq);
+                }
+                return;
+            }
+            redirectHome(target, prev, backSinceHijack);
+            return;
+        }
         // The target has come up since our last redirect: an Amazon-home arrival now is
         // a NEW Home press. Soon after the target appeared, that is the double-press
         // escape; make it stick, or Amazon home's next focus event sends the user back.
@@ -1192,6 +1428,13 @@ public class HijackService extends AccessibilityService {
             }
             return;
         }
+        redirectHome(target, prev, backSinceHijack);
+    }
+
+    private void redirectHome(String target, String prev, boolean backSinceHijack) {
+        // The launcher closed itself on Back: cover Amazon home while it comes back.
+        if (backSinceHijack && target.equals(prev)) showButtonCover(target);
+        hijackedForHomeSeq = homePressSeq;
         // lastHijackAt is armed inside launchTarget on success.
         launchTarget(target, "Redirected Home (from " + prev + ")");
     }
@@ -1322,6 +1565,7 @@ public class HijackService extends AccessibilityService {
             return;
         }
         lastWindowLaunchAt = now;
+        scheduleBrandedAppStop(brandedPkg, appToLaunch);
         // Only the Apps grid gets the grace window. It is the one surface that starts
         // Amazon home by itself, so only there can an arrival be the button rather than
         // the user. Measured 2026-09-15 with Prime Video, Netflix and Disney+ all mapped:
@@ -1353,6 +1597,35 @@ public class HijackService extends AccessibilityService {
             mainHandler.postDelayed(pendingReassert, 700);
             mainHandler.postDelayed(pendingReassert, 1500);
         }
+    }
+
+    /**
+     * Ends the branded app's background process once the mapped app is in front, so it
+     * cannot finish its own start-up chain and pop a screen (YouTube's sign-in page)
+     * over the mapped app. Only for ordinary content apps: never Amazon's shell, the
+     * store, the target or the mapped app, and only while it is really in the background.
+     */
+    private void scheduleBrandedAppStop(final String brandedPkg, final String appToLaunch) {
+        if (mainHandler == null || brandedPkg == null || brandedPkg.equals(appToLaunch)) return;
+        if (AMAZON_APPS_GRID.equals(brandedPkg) || AMAZON_LAUNCHER.equals(brandedPkg)
+                || brandedPkg.startsWith("com.amazon.tv.")
+                || brandedPkg.equals(prefs.getTargetPackage())
+                || !isLeanbackLaunchable(brandedPkg)) {
+            return;
+        }
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() {
+                if (brandedPkg.equals(currentForegroundPkg)) return;
+                try {
+                    android.app.ActivityManager am =
+                            (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+                    am.killBackgroundProcesses(brandedPkg);
+                    Log.i(TAG, "Stopped " + brandedPkg + " in the background");
+                } catch (Exception e) {
+                    Log.w(TAG, "Could not stop " + brandedPkg + ": " + e);
+                }
+            }
+        }, 2_500L);
     }
 
     private void cancelPendingReassert() {
@@ -1498,6 +1771,7 @@ public class HijackService extends AccessibilityService {
         pendingButtonApp = null;
         cancelMask();
         enterEscape(reason);
+        ownHomeDispatchAt = System.currentTimeMillis();
         boolean ok = performGlobalAction(GLOBAL_ACTION_HOME);
         Log.i(TAG, reason + ". Dispatched GLOBAL_ACTION_HOME ok=" + ok);
     }
@@ -1636,6 +1910,12 @@ public class HijackService extends AccessibilityService {
                 consumedDownKey = keyCode;
                 return true;
             }
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_BACK && event.getRepeatCount() == 0
+                && shouldSwallowBackInTarget()) {
+            consumedDownKey = keyCode;
+            return true;
         }
 
         boolean consumed = tryBackOrCenterHijack(keyCode);
@@ -2558,6 +2838,7 @@ public class HijackService extends AccessibilityService {
         consumedDownKey = -1;
         cancelMask();
         hideButtonCover();
+        if (logWatcher != null) logWatcher.stop();
         if (screenOnReceiver != null) {
             try {
                 unregisterReceiver(screenOnReceiver);

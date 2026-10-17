@@ -12,6 +12,13 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS"
         tools:ignore="ProtectedPermissions" />
+    <!-- Optional, granted once via adb: lets LogWatcher see Home presses and remote
+         app buttons in the system's activity-start log. Read-only. -->
+    <uses-permission android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
+    <!-- Ends the branded app (e.g. YouTube) in the background after a mapped button
+         redirected away from it, so it cannot pop back over the mapped app. -->
+    <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
 
     <queries>
         <intent>

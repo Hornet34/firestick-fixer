@@ -186,11 +186,28 @@ public class Prefs {
 
     /** Long-press Home acts as an escape to Amazon's home (and back). */
     public boolean isEscapeLongPress() {
-        return sp.getBoolean(KEY_ESCAPE_LONGPRESS, true);
+        // Off by default in FireStick Fixer: the long-press panel (profiles, sleep,
+        // mirroring) is useful on its own, and taking it over broke those tiles.
+        return sp.getBoolean(KEY_ESCAPE_LONGPRESS, false);
     }
 
     public void setEscapeLongPress(boolean enabled) {
         sp.edit().putBoolean(KEY_ESCAPE_LONGPRESS, enabled).apply();
+    }
+
+    private static final String KEY_BACK_STAYS = "back_stays_on_launcher";
+
+    /**
+     * Back on the target launcher's main screen does nothing, instead of closing the
+     * launcher onto Amazon home (which the redirect then bounces straight back from).
+     * Back inside the launcher's own menus still works, see HijackService.
+     */
+    public boolean isBackStaysOnLauncher() {
+        return sp.getBoolean(KEY_BACK_STAYS, true);
+    }
+
+    public void setBackStaysOnLauncher(boolean enabled) {
+        sp.edit().putBoolean(KEY_BACK_STAYS, enabled).apply();
     }
 
     /** A second Home press within the debounce window escapes to Amazon's home. */
