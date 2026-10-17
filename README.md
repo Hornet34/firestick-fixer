@@ -11,6 +11,8 @@
 - The remote's app buttons (YouTube, Prime Video, Netflix, ⊞ Apps, Live TV, …) can be
   remapped to any app. For example, the YouTube button can open TizenTube.
 - Any app you pick opens automatically at start-up and on wake.
+- Hold the Alexa button **inside an app** and speak: the app you're in searches for what you
+  said, instead of Alexa's own results page.
 
 It is a fork of [Home on Fire](https://github.com/toolicious/home-on-fire) by toolicious
 (GPLv3), reworked for current Fire OS 8 builds. See [What changed](#what-changed-from-home-on-fire).
@@ -33,6 +35,8 @@ Package: `io.github.hatim.firestickfixer`. Tested on a Fire TV Stick (AFTMA08C15
 | <kbd>↩ Back</kbd> out of an app | Your launcher |
 | Hold <kbd>⌂ Home</kbd> | Amazon's normal long-press panel (profiles, sleep, mirroring), untouched |
 | A remapped app button | The app you chose |
+| Hold Alexa inside an app and speak | That app searches for what you said |
+| Hold Alexa on your launcher or Amazon home | Alexa's own results, as usual |
 
 ---
 
@@ -98,6 +102,28 @@ key codes.
   launcher, never to the original app.
 - **Key-code buttons** (colour, number, media keys on some remotes) are swallowed outright
   and open your app instantly.
+
+---
+
+## Alexa voice search in the app you're in
+
+Alexa only hands voice searches to apps built with Amazon's Alexa integration (Netflix,
+Prime Video, …). For any other app it opens its own search page. FireStick Fixer reads
+the spoken words from that page and runs the search in the app you were in:
+
+| App | How the search gets there | From any screen? |
+|---|---|---|
+| YouTube, TizenTube, SmartTube and other YouTube clients | YouTube search link | Yes |
+| Apps that declare Android's standard search | `ACTION_SEARCH` | Yes |
+| Apps with a search box or a labelled Search button | Typed in via accessibility, then Enter | Yes |
+| Apps whose menus are unlabeled icons (e.g. Nuvio) | Typed in, if a search box is showing | Only from their search screen |
+
+Alexa commands and questions (weather, volume, smart home) never reach that search page
+and are not affected. Speak from your launcher or Amazon home to get Alexa's own results,
+or switch the feature off in the app.
+
+The app's config screen shows a **Finish setting up** banner until both one-time `adb`
+grants above are in place, with the exact commands.
 
 ---
 
