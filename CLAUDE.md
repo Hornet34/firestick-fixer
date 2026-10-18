@@ -2,7 +2,7 @@
 
 Fork of Home on Fire for Fire OS 8 (package `io.github.hatim.firestickfixer`). Read these first:
 - `docs/ARCHITECTURE.md` — how every feature works and which signals it uses.
-- `docs/DECISIONS.md` — every decision with its evidence (D1–D44). Add an entry for each new one.
+- `docs/DECISIONS.md` — every decision with its evidence (D1–D45). Add an entry for each new one.
 - `docs/TESTING.md` — `tools/device-test.sh` (automated, over adb) and the manual checklist.
 
 Build: `./build.sh` (needs ~/Android/Sdk and the key in ~/.android-signing/). Install: `adb install -r firestick-fixer.apk`.

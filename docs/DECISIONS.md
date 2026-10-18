@@ -498,6 +498,23 @@ made. Dates are 2026. Test device throughout: Fire TV Stick AFTMA08C15, Fire OS 
   code itself is the owner's to create (captcha): **2595869** (`aftv.news/2595869` → the `latest/download` link above,
   checked). Keep the fixed-name asset on every release, or the code breaks.
 
+### D45 — Fire OS updates blocked at the router (JioFiber), verified (Oct 18, owner's choice)
+- **Why the router:** on the stick, `pm disable-user` is refused for the protected updater and `pm suspend` leaves it
+  running (D20). An in-app DNS filter would need the VPN slot, which the owner's VPN uses. Router filtering changes
+  nothing on the stick and can't break it.
+- **Done (JioFiber JCOW411, firmware ARCNTF1_JCOW411_R3.19.2, owner signed in):** Security → Content Filtering → ON
+  (saved), then Blocked Keywords (no schedule): `softwareupdates.amazon.com`, `updates.amazon.com`,
+  `d1s31zyz7dcc2d.cloudfront.net`, `prod.ota-cloudfront.net`, `amzdigital-a.akamaihd.net`. The firewall's default policy
+  stays "Allow Always". `ftv-smtv.ntp-fireos.com` (clock) is not blocked.
+- **Verified:** the filter matches the server name in https too (SNI). From the laptop, https to all five fails with
+  "connection reset" during the TLS handshake; http redirects to the router's `blocked.html`. From the stick (TLS
+  ClientHello sent with `nc`): no answer from any of the five, while `www.amazon.com` and `www.netflix.com` answer
+  with a ServerHello (`16 03 03`). The stick's network stays `VALIDATED`. It applies to every device on this Wi-Fi.
+- **Watch:** `amzdigital-a.akamaihd.net` may also serve Amazon Appstore downloads; if Appstore installs or updates
+  fail, remove that one keyword first. Amazon could move updates to other hosts; if an update ever arrives, check
+  the stick's update log for the new host and add it.
+- **Undo:** Security → Content Filtering → Blocked Keywords → delete the entries, or switch Content Filtering OFF.
+
 ## Known limits (by design, not bugs)
 - Amazon's own home screen content (ads, rows) can't be changed without root.
 - Apps that paint their own keyboard and have no side menu can't be searched by voice.
