@@ -495,7 +495,8 @@ made. Dates are 2026. Test device throughout: Fire TV Stick AFTMA08C15, Fire OS 
   fixed-name copy `firestick-fixer.apk` to each release and point the code at
   `https://github.com/Hornet34/firestick-fixer/releases/latest/download/firestick-fixer.apk`, which always serves the
   newest one. Done from v3.1.0 on: every release carries `firestick-fixer.apk` plus the versioned copy. The numeric
-  code itself is the owner's to create (captcha).
+  code itself is the owner's to create (captcha): **2595869** (`aftv.news/2595869` → the `latest/download` link above,
+  checked). Keep the fixed-name asset on every release, or the code breaks.
 
 ## Known limits (by design, not bugs)
 - Amazon's own home screen content (ads, rows) can't be changed without root.

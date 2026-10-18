@@ -42,6 +42,15 @@ Package: `io.github.hatim.firestickfixer`. Tested on a Fire TV Stick (AFTMA08C15
 
 ---
 
+## Quick install on the TV: Downloader code **2595869**
+
+1. Install **Downloader** (by AFTVnews) from the Amazon Appstore and allow it to install apps
+   (**Settings → My Fire TV → Developer Options → Install unknown apps → Downloader**).
+2. In Downloader, type **`2595869`** and press Go. It always gets the newest release
+   (the code points to `https://github.com/Hornet34/firestick-fixer/releases/latest/download/firestick-fixer.apk`).
+3. Install, open **FireStick Fixer**, and follow the checklist at the top of its screen: it shows the
+   few `adb` commands left to run once from a computer, and ticks each one off by itself.
+
 ## Install (one time, from a computer with `adb`)
 
 1. On the Fire TV: **Settings → My Fire TV → Developer Options → ADB debugging: On**.
@@ -67,7 +76,8 @@ Both grants survive reboots and updates. You only need `adb` again if you uninst
 
 ### Or: install on the TV and follow the checklist
 
-In **Downloader** on the TV, open this address (it always gets the newest release):
+In **Downloader** on the TV, type the code **`2595869`**, or open this address (both always get the
+newest release):
 
 ```
 https://github.com/Hornet34/firestick-fixer/releases/latest/download/firestick-fixer.apk
