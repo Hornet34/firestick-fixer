@@ -53,12 +53,15 @@ public class MainActivity extends Activity {
     /** Round launch button on the right of the target row. */
     private TextView launchBtn;
     private Switch accessSwitch, hijackSwitch, bootSwitch, verboseSwitch, menuLpSwitch,
-            launchKeyEnabledSwitch, backStaySwitch, voiceSwitch, backHoldSwitch;
+            launchKeyEnabledSwitch, backStaySwitch, voiceSwitch, backHoldSwitch, backHoldForceSwitch;
     /** "Finish setting up" card, shown until both adb grants and the service are in place. */
     private TextView setupBanner;
     /** Status row for the optional READ_LOGS grant, and its right-hand status text. */
     private LinearLayout preciseRow;
     private TextView preciseStatus;
+    /** Fast actions status row (DECISIONS D42) and its right-hand status text. */
+    private LinearLayout fastRow;
+    private TextView fastStatus;
     /** Value box listing the apps that keep Alexa's own results. */
     private TextView alexaAppsBox;
     /** Status text of the Fire OS updates row. */
@@ -564,6 +567,31 @@ public class MainActivity extends Activity {
         LinearLayout startup = addCard(content, getString(R.string.section_startup));
         addBootRow(startup);
 
+        LinearLayout vpn = addCard(content, getString(R.string.section_vpn));
+        addVpnRow(vpn);
+        LinearLayout qm = addCard(content, getString(R.string.section_quick_menu));
+        qmSwitches.add(makeSwitchRow(qm,
+                titled(getString(R.string.switch_quick_menu), R.string.desc_quick_menu),
+                getString(R.string.switch_quick_menu_tip),
+                prefs.isQuickMenu(),
+                prefToggle(new PrefSetter() {
+                    @Override public void set(boolean v) { prefs.setQuickMenu(v); }
+                })));
+        addQmItemRow(qm, Prefs.QM_VPN, R.string.qm_item_vpn, R.string.desc_qm_vpn);
+        addQmItemRow(qm, Prefs.QM_AMAZON, R.string.qm_amazon, R.string.desc_qm_amazon);
+        addQmItemRow(qm, Prefs.QM_FREE, R.string.qm_item_free, R.string.desc_qm_free);
+        addQmItemRow(qm, Prefs.QM_SETTINGS, R.string.qm_settings, R.string.desc_qm_settings);
+
+        LinearLayout fast = addCard(content, getString(R.string.section_fast));
+        addFastRow(fast);
+        backHoldForceSwitch = makeSwitchRow(fast,
+                titled(getString(R.string.switch_back_hold_force), R.string.desc_back_hold_force),
+                getString(R.string.switch_back_hold_force_tip),
+                prefs.isBackHoldForceStop(),
+                prefToggle(new PrefSetter() {
+                    @Override public void set(boolean v) { prefs.setBackHoldForceStop(v); }
+                }));
+
         LinearLayout system = addCard(content, getString(R.string.section_system));
         addUpdatesRow(system);
         addVerboseRow(system);
@@ -708,11 +736,28 @@ public class MainActivity extends Activity {
         t.setTextColor(Colors.NEUTRAL);
         t.setLineSpacing(0f, 1.15f);
         t.setPadding(dp(20), dp(14), dp(20), dp(14));
-        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        final android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
         bg.setColor(0xFF1F1A0E);
         bg.setStroke(dp(2), Colors.AMBER);
         bg.setCornerRadius(dp(14));
         t.setBackground(bg);
+        // Focusable only while OK can hide the optional steps (see refreshSetupBanner).
+        t.setFocusable(false);
+        t.setClickable(true);
+        t.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override public void onFocusChange(View v, boolean hasFocus) {
+                bg.setStroke(dp(hasFocus ? 3 : 2), hasFocus ? Colors.WHITE : Colors.AMBER);
+                if (hasFocus && tipView != null) tipView.setText(getString(R.string.setup_hide_tip));
+            }
+        });
+        t.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                if (!v.isFocusable()) return;
+                prefs.setSetupOptionalHidden(true);
+                refreshSetupBanner();
+                if (initialFocus != null) initialFocus.requestFocus();
+            }
+        });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         lp.topMargin = dp(12);
@@ -721,9 +766,12 @@ public class MainActivity extends Activity {
     }
 
     /**
-     * Re-checks both one-time adb grants and the service on every refresh (so on every
-     * return to this screen) and lists whatever is still missing, with the exact command.
-     * Hidden once everything is in place.
+     * Setup checklist (DECISIONS D44): what this TV still needs from a computer, in order of
+     * importance. 1 is required (without it the service can't be switched on), 2 and 3 are
+     * optional boosts. Each item shows its exact command until the grant is detected, then a tick.
+     * Re-checked every {@link #SETUP_POLL_MS} while this screen is open, so it reacts while the
+     * user types. Hidden when everything is done, or once only optional steps are left and the
+     * user pressed OK on it ("hide the optional steps").
      */
     private void refreshSetupBanner() {
         if (setupBanner == null) return;
@@ -731,35 +779,118 @@ public class MainActivity extends Activity {
                 == PackageManager.PERMISSION_GRANTED;
         boolean logs = LogWatcher.isAvailable(this);
         boolean service = AccessibilityHelper.isOurServiceEnabled(this);
-        if (wss && logs && service) {
-            setupBanner.setVisibility(View.GONE);
+        boolean fast = LocalAdb.verified(this);
+        boolean requiredDone = wss && service;
+        boolean optionalHidden = prefs.isSetupOptionalHidden();
+        if (requiredDone && ((logs && fast) || optionalHidden)) {
+            setBannerShown(false);
             return;
         }
+        String pkg = getPackageName();
+        String ip = ownIpAddress();
+        String host = ip == null ? "<fire-tv-ip>" : ip;
         android.text.SpannableStringBuilder b = new android.text.SpannableStringBuilder();
         appendStyled(b, "⚠  " + getString(R.string.setup_title) + "\n", Colors.AMBER, true, false);
-        if (!wss || !logs) {
+        if (!requiredDone || !logs || !fast) {
             appendStyled(b, getString(R.string.setup_intro) + "\n", Colors.NEUTRAL, false, false);
+            appendStyled(b, "   adb connect " + host + ":5555\n", Colors.BRAND, false, true);
         }
-        if (!wss) {
-            appendStyled(b, "✗ " + getString(R.string.setup_wss) + "\n", Colors.WHITE, true, false);
-            appendStyled(b, "   adb shell pm grant " + getPackageName()
-                    + " android.permission.WRITE_SECURE_SETTINGS\n", Colors.BRAND, false, true);
+        // 1. Required
+        if (wss) {
+            appendStyled(b, "✓ 1  " + getString(R.string.setup_wss) + "\n", Colors.OK, false, false);
+        } else {
+            appendStyled(b, "✗ 1  " + getString(R.string.setup_wss) + "\n", Colors.WHITE, true, false);
+            appendStyled(b, "   adb shell pm grant " + pkg + " android.permission.WRITE_SECURE_SETTINGS\n",
+                    Colors.BRAND, false, true);
         }
-        if (!logs) {
-            appendStyled(b, "✗ " + getString(R.string.setup_logs) + "\n", Colors.WHITE, true, false);
-            appendStyled(b, "   adb shell pm grant " + getPackageName()
-                    + " android.permission.READ_LOGS\n", Colors.BRAND, false, true);
-            appendStyled(b, "   " + getString(R.string.setup_logs_restart) + "\n",
-                    Colors.DIM, false, false);
+        if (wss && !service) {
+            appendStyled(b, "✗    " + getString(R.string.setup_service) + "\n", Colors.WHITE, true, false);
         }
-        if (!service) {
-            appendStyled(b, "✗ " + getString(R.string.setup_service) + "\n", Colors.WHITE, true, false);
+        // 2 and 3: optional boosts, shown once the required step is done (keeps the first screen short
+        // enough that step 1 and the switch below it are both visible).
+        if (!requiredDone) {
+            appendStyled(b, getString(R.string.setup_optional_later) + "\n", Colors.DIM, false, false);
+        } else if (!optionalHidden) {
+            appendStyled(b, getString(R.string.setup_optional) + "\n", Colors.DIM, true, false);
+            if (logs) {
+                appendStyled(b, "✓ 2  " + getString(R.string.setup_logs) + "\n", Colors.OK, false, false);
+            } else {
+                appendStyled(b, "○ 2  " + getString(R.string.setup_logs) + "\n", Colors.WHITE, true, false);
+                appendStyled(b, "   adb shell pm grant " + pkg + " android.permission.READ_LOGS\n",
+                        Colors.BRAND, false, true);
+                appendStyled(b, "   " + getString(R.string.setup_logs_restart) + "\n", Colors.DIM, false, false);
+            }
+            if (fast) {
+                appendStyled(b, "✓ 3  " + getString(R.string.setup_fast) + "\n", Colors.OK, false, false);
+            } else {
+                appendStyled(b, "○ 3  " + getString(R.string.setup_fast) + "\n", Colors.WHITE, true, false);
+                appendStyled(b, "   curl -sL " + SETUP_SCRIPT_URL + " | bash -s " + host + "\n",
+                        Colors.BRAND, false, true);
+                appendStyled(b, "   " + getString(R.string.setup_fast_note) + "\n", Colors.DIM, false, false);
+            }
+            if (requiredDone) {
+                appendStyled(b, getString(R.string.setup_hide_optional) + "\n", Colors.DIM, false, false);
+            }
         }
         // Drop the trailing newline.
         if (b.length() > 0 && b.charAt(b.length() - 1) == '\n') b.delete(b.length() - 1, b.length());
         setupBanner.setText(badgeKeys(b));
-        setupBanner.setVisibility(View.VISIBLE);
+        // Focusable only when OK has something to do (hide the optional steps).
+        setupBanner.setFocusable(requiredDone && !optionalHidden);
+        setBannerShown(true);
     }
+
+    static final String SETUP_SCRIPT_URL =
+            "https://raw.githubusercontent.com/Hornet34/firestick-fixer/main/tools/setup-adb.sh";
+
+    private void setBannerShown(boolean shown) {
+        setupBanner.setVisibility(shown ? View.VISIBLE : View.GONE);
+        if (initialFocus == null) return;
+        ensureId(setupBanner);
+        boolean link = shown && setupBanner.isFocusable();
+        initialFocus.setNextFocusUpId(link ? setupBanner.getId() : View.NO_ID);
+        setupBanner.setNextFocusDownId(initialFocus.getId());
+    }
+
+    /** The TV's own IPv4 address on the current network, for the "adb connect" line. */
+    private String ownIpAddress() {
+        try {
+            android.net.ConnectivityManager cm = getSystemService(android.net.ConnectivityManager.class);
+            android.net.LinkProperties lp = cm.getLinkProperties(cm.getActiveNetwork());
+            if (lp == null) return null;
+            for (android.net.LinkAddress a : lp.getLinkAddresses()) {
+                if (a.getAddress() instanceof java.net.Inet4Address) return a.getAddress().getHostAddress();
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    private static final long SETUP_POLL_MS = 2_000L;
+    private final android.os.Handler setupPoll = new android.os.Handler(android.os.Looper.getMainLooper());
+    private Boolean lastWss, lastService;
+    private final Runnable setupPollTick = new Runnable() {
+        @Override public void run() {
+            boolean wss = checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS)
+                    == PackageManager.PERMISSION_GRANTED;
+            boolean service = AccessibilityHelper.isOurServiceEnabled(MainActivity.this);
+            // The required grant just arrived while the service is off: switch it on, which is
+            // what the user would do next anyway (the switch below stays theirs afterwards).
+            if (Boolean.FALSE.equals(lastWss) && wss && !service) {
+                service = AccessibilityHelper.enableOurService(MainActivity.this);
+            }
+            boolean changed = !Boolean.valueOf(wss).equals(lastWss) || !Boolean.valueOf(service).equals(lastService);
+            lastWss = wss;
+            lastService = service;
+            if (changed) {
+                refresh();
+            } else {
+                refreshSetupBanner();
+                refreshPreciseRow();
+                refreshFastRow();
+            }
+            setupPoll.postDelayed(this, SETUP_POLL_MS);
+        }
+    };
 
     private static void appendStyled(android.text.SpannableStringBuilder b, String text, int color,
                                      boolean bold, boolean mono) {
@@ -793,14 +924,15 @@ public class MainActivity extends Activity {
         View.OnClickListener pick = new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                AppPicker.show(MainActivity.this, getString(R.string.alexa_apps_pick_title),
-                        new AppPicker.OnPicked() {
-                            @Override public void onPicked(String pkg) {
-                                if (pkg == null) return;
-                                boolean listed = prefs.toggleAlexaResultsApp(pkg);
-                                Toast.makeText(MainActivity.this, getString(listed
-                                        ? R.string.alexa_apps_added : R.string.alexa_apps_removed,
-                                        appLabel(pkg)), Toast.LENGTH_SHORT).show();
+                AppPicker.showMulti(MainActivity.this, getString(R.string.alexa_apps_pick_title),
+                        new AppPicker.Selector() {
+                            @Override public boolean isSelected(String pkg) {
+                                return prefs.isAlexaResultsApp(pkg);
+                            }
+                        },
+                        new AppPicker.OnSelection() {
+                            @Override public void onToggled(String pkg, boolean selected) {
+                                prefs.setAlexaResultsApp(pkg, selected);
                                 refreshAlexaAppsBox();
                             }
                         });
@@ -817,13 +949,85 @@ public class MainActivity extends Activity {
 
     private LinearLayout alexaAppsRow, updatesRow;
 
+    /** One switch per quick-menu item: shows or hides it in the held-Menu menu. */
+    private void addQmItemRow(LinearLayout card, final String id, int label, int desc) {
+        qmSwitches.add(makeSwitchRow(card, titled(getString(label), desc), getString(desc),
+                prefs.isQmItem(id),
+                prefToggle(new PrefSetter() {
+                    @Override public void set(boolean v) { prefs.setQmItem(id, v); }
+                })));
+    }
+    private TextView vpnBox;
+    private LinearLayout vpnRowView;
+    private final java.util.ArrayList<Switch> qmSwitches = new java.util.ArrayList<Switch>();
+
+    /**
+     * "VPN app" row: lists the VPN apps found on the device (any app with a VPN service),
+     * shows whether a VPN is up, and lets the user choose which one the Menu key toggles
+     * while the long-press panel is open.
+     */
+    private void addVpnRow(LinearLayout card) {
+        LinearLayout outer = new LinearLayout(this);
+        outer.setOrientation(LinearLayout.HORIZONTAL);
+        outer.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout row = infoRow(titled(getString(R.string.vpn_label), R.string.desc_vpn));
+        outer.addView(row, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        vpnBox = valueBox();
+        outer.addView(vpnBox);
+        View.OnClickListener pick = new View.OnClickListener() {
+            @Override public void onClick(View v) { pickVpnApp(); }
+        };
+        vpnRowView = row;
+        row.setOnClickListener(pick);
+        vpnBox.setOnClickListener(pick);
+        attachTip(row, getString(R.string.vpn_tip));
+        attachTip(vpnBox, getString(R.string.vpn_tip));
+        card.addView(outer);
+        refreshVpnBox();
+    }
+
+    private void refreshVpnBox() {
+        if (vpnBox == null) return;
+        String pkg = VpnHelper.resolveApp(this, prefs);
+        String state = getString(VpnHelper.isConnected(this) ? R.string.vpn_state_on : R.string.vpn_state_off);
+        vpnBox.setText(pkg == null ? getString(R.string.vpn_none) : appLabel(pkg) + "  \u2022  " + state);
+    }
+
+    private void pickVpnApp() {
+        final java.util.List<String> apps = VpnHelper.installedApps(this);
+        if (apps.isEmpty()) {
+            Toast.makeText(this, R.string.vpn_none_installed, Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] names = new String[apps.size()];
+        int checked = -1;
+        String current = VpnHelper.resolveApp(this, prefs);
+        for (int i = 0; i < names.length; i++) {
+            names[i] = appLabel(apps.get(i)).toString();
+            if (apps.get(i).equals(current)) checked = i;
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.vpn_pick_title)
+                .setSingleChoiceItems(names, checked, new android.content.DialogInterface.OnClickListener() {
+                    @Override public void onClick(android.content.DialogInterface d, int which) {
+                        prefs.setVpnApp(apps.get(which));
+                        d.dismiss();
+                        refreshVpnBox();
+                    }
+                })
+                .show();
+    }
+
     private void refreshAlexaAppsBox() {
         if (alexaAppsBox == null) return;
-        java.util.Set<String> apps = prefs.getAlexaResultsApps();
+        java.util.ArrayList<String> apps = new java.util.ArrayList<String>();
+        for (String pkg : AppPicker.launchablePackages(this)) {
+            if (prefs.isAlexaResultsApp(pkg)) apps.add(pkg);
+        }
         if (apps.isEmpty()) {
             alexaAppsBox.setText(R.string.alexa_apps_none);
         } else if (apps.size() == 1) {
-            alexaAppsBox.setText(appLabel(apps.iterator().next()));
+            alexaAppsBox.setText(appLabel(apps.get(0)));
         } else {
             alexaAppsBox.setText(getString(R.string.alexa_apps_count, apps.size()));
         }
@@ -926,6 +1130,87 @@ public class MainActivity extends Activity {
         updatesStatus.setText("● " + getString(blocked ? R.string.updates_blocked : R.string.updates_auto)
                 + (changed.isEmpty() ? "" : "  · " + getString(R.string.updates_changed, changed)));
         updatesStatus.setTextColor(blocked ? Colors.OK : Colors.AMBER);
+    }
+
+    /**
+     * Fast actions status row (D42). Not a switch: setup needs a computer once. OK tests the
+     * connection (and, on a Wi-Fi not yet allowed, brings up the system's allow dialog).
+     */
+    private void addFastRow(LinearLayout card) {
+        final LinearLayout row = infoRow(titled(getString(R.string.fast_label), R.string.desc_fast));
+        fastStatus = new TextView(this);
+        fastStatus.setTextSize(15);
+        row.addView(fastStatus);
+        row.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String st = LocalAdb.status(MainActivity.this);
+                if (LocalAdb.NOT_SET_UP.equals(st) || LocalAdb.NO_PERMISSION.equals(st)
+                        || LocalAdb.ADB_OFF.equals(st) || LocalAdb.KEY_REJECTED.equals(st)) {
+                    Toast.makeText(MainActivity.this, fastTip(), Toast.LENGTH_LONG).show();
+                    return;
+                }
+                testFastActions();
+            }
+        });
+        row.setOnKeyListener(new RightNavGuard(null));
+        row.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            @Override
+            public void onFocusChange(View view, boolean hasFocus) {
+                if (hasFocus && tipView != null) tipView.setText(badgeKeys(fastTip()));
+            }
+        });
+        fastRow = row;
+        card.addView(row);
+    }
+
+    private String fastTip() {
+        String st = LocalAdb.status(this);
+        if (LocalAdb.READY.equals(st)) return getString(R.string.fast_tip_ready);
+        if (LocalAdb.WIFI_REFUSED.equals(st)) return getString(R.string.fast_tip_wifi);
+        if (LocalAdb.ADB_OFF.equals(st)) return getString(R.string.fast_tip_adb);
+        if (LocalAdb.KEY_REJECTED.equals(st)) return getString(R.string.fast_tip_key);
+        if (LocalAdb.FAILED.equals(st)) return getString(R.string.fast_tip_failed, LocalAdb.statusDetail());
+        return getString(R.string.fast_tip_setup);
+    }
+
+    private void testFastActions() {
+        LocalAdb.resetStatus();
+        fastStatus.setText("● " + getString(R.string.fast_testing));
+        fastStatus.setTextColor(Colors.DIM);
+        final String[] model = new String[1];
+        LocalAdb.submit(this, "settings test", new LocalAdb.Job() {
+            @Override public void run(LocalAdb.Session s) throws Exception {
+                model[0] = AdbActions.model(s);
+            }
+        }, new LocalAdb.Callback() {
+            @Override public void done(boolean ok) {
+                if (isFinishing()) return;
+                Toast.makeText(MainActivity.this, ok ? getString(R.string.fast_test_ok, model[0])
+                        : getString(R.string.fast_test_failed, fastStatusText()), Toast.LENGTH_LONG).show();
+                refreshFastRow();
+                View f = getCurrentFocus();
+                if (f == fastRow && tipView != null) tipView.setText(badgeKeys(fastTip()));
+            }
+        });
+    }
+
+    private String fastStatusText() {
+        String st = LocalAdb.status(this);
+        if (LocalAdb.READY.equals(st)) return getString(R.string.fast_ready);
+        if (LocalAdb.NO_PERMISSION.equals(st)) return getString(R.string.fast_no_permission);
+        if (LocalAdb.ADB_OFF.equals(st)) return getString(R.string.fast_adb_off);
+        if (LocalAdb.WIFI_REFUSED.equals(st)) return getString(R.string.fast_wifi_refused);
+        if (LocalAdb.KEY_REJECTED.equals(st)) return getString(R.string.fast_key_rejected);
+        if (LocalAdb.FAILED.equals(st)) return getString(R.string.fast_failed);
+        return getString(R.string.fast_not_set_up);
+    }
+
+    private void refreshFastRow() {
+        if (fastStatus == null) return;
+        boolean ready = LocalAdb.READY.equals(LocalAdb.status(this));
+        fastStatus.setText("● " + fastStatusText());
+        fastStatus.setTextColor(ready ? Colors.OK : Colors.AMBER);
     }
 
     private void refreshPreciseRow() {
@@ -2622,8 +2907,13 @@ public class MainActivity extends Activity {
         // directly underneath. The right-hand controls stay reachable via RIGHT.
         View voiceRow = rowOf(voiceSwitch);
         View holdRow = rowOf(backHoldSwitch);
-        View[] column = {initialFocus, accessRow, hijackRow, backRow, holdRow, launchKeyRow, voiceRow,
-                alexaAppsRow, preciseRow, bootRow, updatesRow, verboseRow};
+        // The VPN row and the quick-menu switches sit between start-up and System.
+        java.util.ArrayList<View> col = new java.util.ArrayList<View>();
+        java.util.Collections.addAll(col, initialFocus, accessRow, hijackRow, backRow, holdRow,
+                launchKeyRow, voiceRow, alexaAppsRow, preciseRow, bootRow, vpnRowView);
+        for (Switch sw : qmSwitches) col.add(rowOf(sw));
+        java.util.Collections.addAll(col, fastRow, rowOf(backHoldForceSwitch), updatesRow, verboseRow);
+        View[] column = col.toArray(new View[0]);
         for (View v : column) {
             ensureId(v);
         }
@@ -2664,7 +2954,12 @@ public class MainActivity extends Activity {
         if (bootAppBox != null) {
             ensureId(bootAppBox);
             if (preciseRow != null) bootAppBox.setNextFocusUpId(preciseRow.getId());
-            if (updatesRow != null) bootAppBox.setNextFocusDownId(updatesRow.getId());
+            if (vpnRowView != null) bootAppBox.setNextFocusDownId(vpnRowView.getId());
+        }
+        if (vpnBox != null && vpnRowView != null) {
+            ensureId(vpnBox);
+            if (bootRow != null) vpnBox.setNextFocusUpId(bootRow.getId());
+            if (!qmSwitches.isEmpty()) vpnBox.setNextFocusDownId(rowOf(qmSwitches.get(0)).getId());
         }
         if (logBtn != null && bootRow != null) {
             logBtn.setNextFocusUpId(bootRow.getId());
@@ -2788,6 +3083,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        lastWss = null;
+        lastService = null;
+        setupPoll.removeCallbacks(setupPollTick);
+        setupPoll.post(setupPollTick);
         // State (target package, accessibility status, ...) might have
         // changed while this activity was paused, e.g. via the picker.
         refresh();
@@ -2838,6 +3137,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        setupPoll.removeCallbacks(setupPollTick);
         // We deliberately do NOT cancel an in-progress learn here. Pressing a branded
         // button (Apps, Live TV, ...) opens its app and backgrounds this screen, and
         // that window is exactly what we're trying to capture. A learn is instead ended
@@ -3021,6 +3321,7 @@ public class MainActivity extends Activity {
         refreshSetupBanner();
         refreshAlexaAppsBox();
         refreshUpdatesRow();
+        refreshFastRow();
     }
 
     /**
@@ -3086,6 +3387,7 @@ public class MainActivity extends Activity {
             backStaySwitch.setChecked(prefs.isBackStaysOnLauncher());
             voiceSwitch.setChecked(prefs.isVoiceSearchToApp());
             backHoldSwitch.setChecked(prefs.isBackHoldExit());
+            if (backHoldForceSwitch != null) backHoldForceSwitch.setChecked(prefs.isBackHoldForceStop());
             launchKeyEnabledSwitch.setChecked(prefs.isLaunchKeyEnabled());
         } finally {
             suppressSwitchEvents = false;
@@ -3124,6 +3426,7 @@ public class MainActivity extends Activity {
         setRowEnabled(backStaySwitch, accessOn);
         setRowEnabled(voiceSwitch, accessOn);
         setRowEnabled(backHoldSwitch, accessOn);
+        setRowEnabled(backHoldForceSwitch, accessOn);
         updateBootBoxState();
         setRowEnabled(launchKeyEnabledSwitch, accessOn);
         // The value box is gated on both the service AND the shortcut toggle.

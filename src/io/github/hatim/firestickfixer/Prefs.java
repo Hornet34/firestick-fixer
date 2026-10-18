@@ -26,6 +26,9 @@ public class Prefs {
     private static final String KEY_ENABLED = "hijack_enabled";
     private static final String KEY_VERBOSE = "verbose_logging";
     private static final String KEY_MENU_LP = "menu_longpress_launch";
+    private static final String KEY_VPN_APP = "vpn_app";
+    private static final String KEY_ALEXA_APPS_OFF = "alexa_results_apps_off";
+    private static final String KEY_QUICK_MENU = "quick_menu";
 
     // Instant, delay-free launcher shortcuts that do NOT go through the Home
     // button (so the Fire OS 7 app-switch lock is never armed): a redirect off
@@ -228,6 +231,24 @@ public class Prefs {
         sp.edit().putBoolean(KEY_BACK_HOLD, enabled).apply();
     }
 
+    /** The owner pressed OK on the setup checklist to hide its optional steps (D44). */
+    public boolean isSetupOptionalHidden() {
+        return sp.getBoolean("setup_optional_hidden", false);
+    }
+
+    public void setSetupOptionalHidden(boolean on) {
+        sp.edit().putBoolean("setup_optional_hidden", on).apply();
+    }
+
+    /** With Fast actions ready, hold Back force-stops the app instead of backing out of it (D42). */
+    public boolean isBackHoldForceStop() {
+        return sp.getBoolean("back_hold_force_stop", true);
+    }
+
+    public void setBackHoldForceStop(boolean on) {
+        sp.edit().putBoolean("back_hold_force_stop", on).apply();
+    }
+
     private static final String KEY_VOICE_ROUTE = "voice_route:";
 
     /** Side-menu item (0-based) that reached an app's search last time, or -1. */
@@ -239,27 +260,77 @@ public class Prefs {
         sp.edit().putInt(KEY_VOICE_ROUTE + pkg, index).apply();
     }
 
+    private static final String KEY_VOICE_ROUTE2 = "voice_route2:";
+
+    /**
+     * The way that last reached an app's search: "box" (a search box was already there),
+     * "label" (a Search button first) or "menu:N" (side-menu item N). Null when unknown.
+     * Stored in this app's own preferences (shared_prefs/home_on_fire.xml), so it survives
+     * reboots and updates of this app.
+     */
+    public String getVoiceRouteKind(String pkg) {
+        String s = sp.getString(KEY_VOICE_ROUTE2 + pkg, null);
+        if (s != null) return s;
+        int old = getVoiceRoute(pkg); // routes saved before the kind existed were menu items
+        return old >= 0 ? "menu:" + old : null;
+    }
+
+    public void setVoiceRouteKind(String pkg, String kind) {
+        sp.edit().putString(KEY_VOICE_ROUTE2 + pkg, kind).remove(KEY_VOICE_ROUTE + pkg).apply();
+    }
+
+    public void clearVoiceRoute(String pkg) {
+        sp.edit().remove(KEY_VOICE_ROUTE2 + pkg).remove(KEY_VOICE_ROUTE + pkg).apply();
+    }
+
     private static final String KEY_ALEXA_APPS = "voice_alexa_apps";
     private static final String KEY_LAST_OS = "last_os_build";
     private static final String KEY_OS_CHANGED_FROM = "os_changed_from";
 
     /** Apps where Alexa's own results should stay (voice search is not handed to them). */
+    /** Apps the user explicitly ticked. */
     public java.util.Set<String> getAlexaResultsApps() {
         return new java.util.HashSet<String>(
                 sp.getStringSet(KEY_ALEXA_APPS, java.util.Collections.<String>emptySet()));
     }
 
-    public boolean isAlexaResultsApp(String pkg) {
-        return getAlexaResultsApps().contains(pkg);
+    /** Apps the user explicitly unticked, i.e. overrides of the Amazon default. */
+    private java.util.Set<String> getAlexaAppsOff() {
+        return new java.util.HashSet<String>(
+                sp.getStringSet(KEY_ALEXA_APPS_OFF, java.util.Collections.<String>emptySet()));
     }
 
-    /** Adds the app if absent, removes it if present; returns whether it is now listed. */
+    /**
+     * Whether Alexa's own results are kept for this app. Amazon's own apps (com.amazon.*)
+     * keep them by default, since they have no in-app search worth driving; any choice the
+     * user makes, either way, wins over that default.
+     */
+    public boolean isAlexaResultsApp(String pkg) {
+        if (pkg == null) return false;
+        if (getAlexaResultsApps().contains(pkg)) return true;
+        if (getAlexaAppsOff().contains(pkg)) return false;
+        return pkg.startsWith("com.amazon.");
+    }
+
+    /** Records the user's choice for one app. */
+    public void setAlexaResultsApp(String pkg, boolean keep) {
+        java.util.Set<String> on = getAlexaResultsApps();
+        java.util.Set<String> off = getAlexaAppsOff();
+        if (keep) {
+            on.add(pkg);
+            off.remove(pkg);
+        } else {
+            on.remove(pkg);
+            off.add(pkg);
+        }
+        sp.edit().putStringSet(KEY_ALEXA_APPS, on).putStringSet(KEY_ALEXA_APPS_OFF, off).apply();
+    }
+
+    /** Flips the app; returns whether it now keeps Alexa's results. */
     public boolean toggleAlexaResultsApp(String pkg) {
-        java.util.Set<String> set = getAlexaResultsApps();
-        boolean nowListed = set.add(pkg);
-        if (!nowListed) set.remove(pkg);
-        sp.edit().putStringSet(KEY_ALEXA_APPS, set).apply();
-        return nowListed;
+        boolean now = !isAlexaResultsApp(pkg);
+        setAlexaResultsApp(pkg, now);
+        return now;
     }
 
     public String getLastOsBuild() {
@@ -473,6 +544,36 @@ public class Prefs {
                 .putInt(KEY_MASK_HOLD, DEFAULT_MASK_HOLD)
                 .putInt(KEY_MASK_FADE, DEFAULT_MASK_FADE)
                 .apply();
+    }
+
+    /** The VPN app to toggle; empty = the only installed one, if there is exactly one. */
+    public String getVpnApp() {
+        return sp.getString(KEY_VPN_APP, "");
+    }
+
+    public void setVpnApp(String pkg) {
+        sp.edit().putString(KEY_VPN_APP, pkg == null ? "" : pkg).apply();
+    }
+
+    /** Holding Menu opens the quick menu. */
+    public boolean isQuickMenu() {
+        return sp.getBoolean(KEY_QUICK_MENU, true);
+    }
+
+    public static final String QM_VPN = "vpn", QM_AMAZON = "amazon",
+            QM_SETTINGS = "settings", QM_FREE = "free";
+
+    /** Whether an item shows in the quick menu (all on by default). */
+    public boolean isQmItem(String id) {
+        return sp.getBoolean("qm_item_" + id, true);
+    }
+
+    public void setQmItem(String id, boolean on) {
+        sp.edit().putBoolean("qm_item_" + id, on).apply();
+    }
+
+    public void setQuickMenu(boolean on) {
+        sp.edit().putBoolean(KEY_QUICK_MENU, on).apply();
     }
 
     private static int clamp(int v, int lo, int hi) {

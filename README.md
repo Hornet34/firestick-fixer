@@ -34,6 +34,7 @@ Package: `io.github.hatim.firestickfixer`. Tested on a Fire TV Stick (AFTMA08C15
 | <kbd>↩ Back</kbd> on your launcher's main screen | Nothing. It no longer drops you onto Amazon home. Back inside the launcher's own menus still works |
 | <kbd>↩ Back</kbd> out of an app | Your launcher |
 | Hold <kbd>⌂ Home</kbd> | Amazon's normal long-press panel (profiles, sleep, mirroring), untouched |
+| Hold <kbd>☰ Menu</kbd> (anywhere) | The quick menu, styled like Amazon's own panel: VPN on/off with its status, Amazon home, Fixer settings. Choose which items appear in Settings → Quick menu |
 | A remapped app button | The app you chose |
 | Hold Alexa inside an app and speak | That app searches for what you said (Back during the countdown keeps Alexa's results) |
 | Hold <kbd>↩ Back</kbd> ~1 s inside an app | Straight to your launcher; the app is closed |
@@ -63,6 +64,38 @@ adb shell pm grant io.github.hatim.firestickfixer android.permission.READ_LOGS
    **Your launcher**.
 
 Both grants survive reboots and updates. You only need `adb` again if you uninstall the app.
+
+### Or: install on the TV and follow the checklist
+
+In **Downloader** on the TV, open this address (it always gets the newest release):
+
+```
+https://github.com/Hornet34/firestick-fixer/releases/latest/download/firestick-fixer.apk
+```
+
+Then open FireStick Fixer and follow the checklist at the top of its screen. It shows the TV's address and the exact commands to type on a computer, required
+first, then the optional boosts. Each one ticks off by itself once it's done, and the service
+switches itself on after the required one.
+
+### Optional: Fast actions (instant app closing)
+
+With Fast actions, holding <kbd>↩ Back</kbd> force-stops the app (it starts fresh next time),
+and the quick menu gets **Free up memory**. FireStick Fixer does this through the stick's own
+`adb` (wireless debugging, on `127.0.0.1` only, a tenth of a second per action), so it needs
+one more step from the computer, once:
+
+```sh
+tools/setup-adb.sh <fire-tv-ip>
+# or, without cloning the repo:
+curl -sL https://raw.githubusercontent.com/Hornet34/firestick-fixer/main/tools/setup-adb.sh | bash -s <fire-tv-ip>
+```
+
+The script does the two grants above too. Press **Allow** on the TV when it asks ("Allow USB
+debugging?", and on a new Wi-Fi "Allow wireless debugging on this network?"). The app makes its
+own key; the private key never leaves the TV. Only a fixed list of commands exists (force-stop,
+and read-only checks); system and Amazon apps, your launcher, keyboard and connected VPN app
+are never stopped. Without Fast actions everything works as before. Details:
+[docs/DECISIONS.md](docs/DECISIONS.md) D34–D42.
 
 ### Why `READ_LOGS`?
 
@@ -162,6 +195,8 @@ grants above are in place, with the exact commands.
 - Fixed the Back loop between a remapped app and the original (e.g. TizenTube ↔ YouTube).
 - Back on the launcher's main screen does nothing; Back in its menus still works.
 - Choose any app to open at start-up, not just the launcher.
+- Quick menu on a held Menu button, with a VPN switch that works with any installed VPN app
+  (it opens the VPN app behind a progress screen, presses connect or disconnect, and returns).
 - New interface, logo and banner; removed the Menu long-press, long-press escape and
   Fire OS 7 loading-screen options from the UI.
 

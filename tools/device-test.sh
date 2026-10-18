@@ -45,7 +45,7 @@ check() { # check <name> <detail> <command...>
 }
 
 # ---- settings: every feature on for the run, the user's settings back afterwards ----
-SWITCHES=(hijack doubleTap backStays backHold remap voice)
+SWITCHES=(hijack doubleTap backStays backHold backHoldForce remap voice)
 declare -A ORIGINAL
 snapshot_and_enable() {
   local sw
@@ -116,9 +116,42 @@ t_back_on_launcher() {
 
 t_hold_back() {
   [[ -z "$TEST_APP" ]] && { result hold_back SKIP "no test app"; return; }
+  # The back-out path (without Fast actions); hold_back_force tests the other one.
+  hook set backHoldForce false >/dev/null
   open_app "$TEST_APP"; wait_fg "$TEST_APP" 8; sleep 1; hook clearlog >/dev/null
   hook key BACK hold >/dev/null; sleep 1.5
   check hold_back "holding Back in $TEST_APP closes it to $TARGET" wait_fg "$TARGET" 5
+  hook set backHoldForce true >/dev/null
+}
+
+# Fast actions (D42): only if set up (tools/setup-adb.sh); never touches system apps.
+t_fast() {
+  local st r
+  st=$(state fast)
+  [[ "$st" == "not_set_up" || -z "$st" ]] && { result fast SKIP "Fast actions not set up (tools/setup-adb.sh)"; return; }
+  hook adb test >/dev/null
+  r=""; for _ in $(seq 1 40); do r=$(hook adb result); [[ "$r" != RUNNING* ]] && break; sleep 0.5; done
+  [[ "$r" == OK* ]] && result fast PASS "$r" || result fast FAIL "$r"
+  # The package checks must refuse the launcher, this app and Amazon's home.
+  local p bad=""
+  for p in "$TARGET" "$PKG" "$AMAZON_HOME"; do
+    [[ "$(hook adb check "$p")" == NO* ]] || bad="$bad $p"
+  done
+  [[ -z "$bad" ]] && result fast_checks PASS "refuses launcher, this app, Amazon home" \
+                  || result fast_checks FAIL "would force-stop:$bad"
+}
+
+t_hold_back_force() {
+  [[ -z "$TEST_APP" ]] && { result hold_back_force SKIP "no test app"; return; }
+  [[ "$(state fast)" == ready ]] || { result hold_back_force SKIP "Fast actions not ready ($(state fast))"; return; }
+  [[ "$(hook adb check "$TEST_APP")" == OK* ]] || { result hold_back_force SKIP "$TEST_APP may not be force-stopped"; return; }
+  open_app "$TEST_APP"; wait_fg "$TEST_APP" 8; sleep 1; hook clearlog >/dev/null
+  hook key BACK hold >/dev/null; sleep 2.5
+  if wait_fg "$TARGET" 5 && wait_log "force-stop $TEST_APP done" 5 && [[ -z "$(sh_ pidof "$TEST_APP")" ]]; then
+    result hold_back_force PASS "holding Back force-stopped $TEST_APP and opened $TARGET"
+  else
+    result hold_back_force FAIL "front: $(fg), pid: $(sh_ pidof "$TEST_APP")"
+  fi
 }
 
 t_short_back() {
@@ -176,7 +209,7 @@ t_alexa_list() {
 }
 
 ALL=(service home_from_app home_from_launcher double_tap single_after_escape back_on_launcher
-     hold_back short_back buttons voice voice_keep_alexa alexa_list)
+     hold_back short_back buttons voice voice_keep_alexa alexa_list fast hold_back_force)
 if [[ "${1:-}" == "--list" ]]; then printf '%s\n' "${ALL[@]}"; exit 0; fi
 TESTS=("$@"); [[ ${#TESTS[@]} -eq 0 ]] && TESTS=("${ALL[@]}")
 

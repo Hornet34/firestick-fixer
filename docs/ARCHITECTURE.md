@@ -28,6 +28,8 @@ So the app reacts to what those keys *cause* instead. Three signal sources:
 | `MainActivity.java` | The settings screen (built in code, no XML layouts). Remote-only navigation with explicit focus wiring. |
 | `Prefs.java` | All settings (SharedPreferences). |
 | `BootReceiver.java` | Fallback for the start-up app (Fire OS delivers `BOOT_COMPLETED` ~1 min late; the service normally handles boot first). |
+| `LocalAdb.java`, `AdbKey.java`, `AdbActions.java` | Fast actions: the session to the stick's own adbd, the app's adb key, and the only commands it may run (see below). |
+| `tools/setup-adb.sh` | One-time setup from a computer: grants and the Fast actions key approval. |
 | `TestHooks.java` | Commands reachable only via `adb shell dumpsys activity service …` (shell-only `DUMP` permission), used by `tools/device-test.sh`: state, log, synthetic Back presses, voice and button simulation, feature switches. They run on the app's main thread (where dumpsys requests arrive), so they never wait on it. |
 | `RingLog.java` | In-memory copy of the service's log (Fire OS keeps app logcat for ~14 s). Read with `dumpsys` (no arguments). |
 | `AppPicker`, `TargetPickerActivity`, `CustomMap`, `KeyBadges`, `InfoDialog`, `LogViewerActivity` | Pickers, mapping model, key-badge text, about dialog and on-device log viewer (inherited from Home on Fire, restyled). |
@@ -94,7 +96,10 @@ So the app reacts to what those keys *cause* instead. Three signal sources:
    5. walking the app's left-edge side menu (items tried top to bottom, waiting up to
       2.5 s each for a search box). The item that worked is remembered per app and tried
       first next time.
-5. During steps 3–5 a waiting panel ("Opening search in …") covers the screen; Back
+5. The way that worked is remembered per app (`box`, `label`, `menu:N` or a chain like `menu:0+label`) and replayed first
+   next time; if it fails it is forgotten and every step is tried again (D29). If nothing works, a card explains and offers
+   "Show Alexa's results for <app>".
+6. During steps 3–5 a waiting panel ("Opening search in …") covers the screen; Back
    cancels.
 - Apps in "Apps that keep Alexa's results" are skipped entirely.
 
@@ -115,6 +120,33 @@ So the app reacts to what those keys *cause* instead. Three signal sources:
   renames it, that one feature stops, nothing breaks.
 - The service notes the Fire OS build and tells the user when it changed.
 
+### Quick menu (hold Menu) and VPN switch
+- A Menu hold of the system long-press time (the one Home uses, 400 ms here) opens the menu; the first press
+  reaches the app as usual, the rest is held back. It is an overlay card drawn like Amazon's panel; the key filter
+  drives it (Up/Down/OK/Back). Items are switchable in Settings; a short Menu press is untouched.
+- VPN: apps are found by their `android.net.VpnService` service; state is the network's VPN transport. The toggle
+  opens the VPN app under a cover, clicks its connect/disconnect button by label (falling back to the focused
+  node), accepts the system consent dialog, confirms by network state and presses Back. Details: DECISIONS D24-D27.
+
+### Fast actions (the stick's own adb)
+- Fire OS drops connections from the stick to its classic `:5555` adb port, but not to the
+  wireless-debugging port (D36, D38). `LocalAdb` switches wireless debugging on (own
+  `WRITE_SECURE_SETTINGS`; the port is up ~75 ms later), finds the port by mDNS
+  (`_adb-tls-connect._tcp`, ~10 ms; fallback: a loopback port scan, ~0.7 s), connects to
+  `127.0.0.1` over TLS 1.3 with the app's key (`AdbKey`) and runs shell commands on one session.
+  After 20 s idle, or at screen-off, it closes and switches wireless debugging off again.
+- `AdbActions` is the only place commands are built: `cmd activity force-stop <pkg>`,
+  `ps -A -o NAME`, `dumpsys media_session`, `getprop ro.product.model`. A package must pass
+  `whyNotStoppable` (not system/Amazon, not this app, launcher, keyboard, an app with an enabled
+  accessibility service or notification listener, or the connected VPN app).
+- Setup (`tools/setup-adb.sh`): the app makes its RSA key; adbd shows its "Allow USB debugging?"
+  prompt only for connections from another device, so the script relays the app's connection
+  (`adb reverse` → computer → stick `:5555`) once. Approved keys never expire
+  (`adb_allowed_connection_time 0`).
+- Uses: hold Back force-stops the app (launcher first, then the stop, ~0.2 s), and quick menu
+  **Free up memory** stops every stoppable running app except the one on screen and playing media.
+  Without Fast actions both fall back (hold Back backs out; the menu item is hidden).
+
 ## Overlay windows
 All are `TYPE_ACCESSIBILITY_OVERLAY`, not focusable and not touchable, so keys still go
 to the app underneath (the service sees them first in its key filter):
@@ -132,4 +164,7 @@ to the app underneath (the service sees them first in its key filter):
 | `RECEIVE_BOOT_COMPLETED` | Start-up app fallback | Normal |
 | `KILL_BACKGROUND_PROCESSES` | Stop a remapped app's original, and apps closed with hold-Back | Normal |
 
-No `INTERNET` permission: nothing leaves the device.
+| `INTERNET` | Fast actions: the stick's own adbd on `127.0.0.1`, and once the setup computer's relay | Normal |
+
+Nothing leaves the device: the only connections are to the stick's own adb (Fast actions) and,
+during `tools/setup-adb.sh`, to the computer running it.

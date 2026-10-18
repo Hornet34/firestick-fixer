@@ -224,7 +224,7 @@ public class HijackService extends AccessibilityService {
     private static final long LONGPRESS_REDIRECT_BYPASS_MS = 5_000L;
 
     /** Threshold above which we treat a Menu key as a long press. */
-    private static final long MENU_LONG_PRESS_THRESHOLD_MS = 500L;
+    private static final long MENU_LONG_PRESS_THRESHOLD_MS = 1_500L;
 
     /** Handler on the main looper, used to schedule Menu long-press fires. */
     private android.os.Handler mainHandler;
@@ -309,11 +309,17 @@ public class HijackService extends AccessibilityService {
             @Override
             public void onReceive(android.content.Context context,
                                   android.content.Intent intent) {
+                if (Intent.ACTION_SCREEN_OFF.equals(intent.getAction())) {
+                    // Standby: end any Fast actions session and switch wireless debugging off.
+                    LocalAdb.closeNow("screen off");
+                    return;
+                }
                 handleWakeFromStandby();
             }
         };
-        registerReceiver(screenOnReceiver,
-                new android.content.IntentFilter(Intent.ACTION_SCREEN_ON));
+        android.content.IntentFilter screenFilter = new android.content.IntentFilter(Intent.ACTION_SCREEN_ON);
+        screenFilter.addAction(Intent.ACTION_SCREEN_OFF);
+        registerReceiver(screenOnReceiver, screenFilter);
     }
 
     /**
@@ -773,9 +779,28 @@ public class HijackService extends AccessibilityService {
         RingLog.i(TAG, "Voice search: typing into " + app);
         sideMenuNext = 0;
         lastClickedMenuIndex = -1;
-        learnedRoute = prefs.getVoiceRoute(app);
+        // A remembered route is replayed on its own first; if it does not reach a search
+        // box it is forgotten and the whole ladder runs again from the screen it left.
+        final String[] route = {prefs.getVoiceRouteKind(app)};
+        final boolean[] strict = {route[0] != null};
+        final boolean[] acted = {false};
+        learnedRoute = -1;
+        final StringBuilder steps = new StringBuilder(); // what this attempt did: menu:N, label
+        final boolean[] menuDone = {false};
+        int menuAt = route[0] == null ? -1 : route[0].indexOf("menu:");
+        if (menuAt >= 0) {
+            int end = route[0].indexOf('+', menuAt);
+            try {
+                learnedRoute = Integer.parseInt(route[0].substring(menuAt + 5,
+                        end < 0 ? route[0].length() : end));
+            } catch (NumberFormatException e) {
+                route[0] = null;
+                strict[0] = false;
+            }
+        }
+        if (strict[0]) RingLog.i(TAG, "Voice search: replaying remembered route '" + route[0] + "' for " + app);
         final int token = ++typeSearchToken;
-        final long start = System.currentTimeMillis();
+        final long[] startAt = {System.currentTimeMillis()};
         final long[] lastMenuClick = {0L};
         final boolean[] clickedLabel = {false};
         final int[] lastSig = {-1};
@@ -783,7 +808,7 @@ public class HijackService extends AccessibilityService {
             @Override public void run() {
                 if (token != typeSearchToken) return;
                 long now = System.currentTimeMillis();
-                long sinceStart = now - start;
+                long sinceStart = now - startAt[0];
                 long sinceMenu = now - lastMenuClick[0];
                 // Settle first: an app brought back to the front can take seconds to
                 // rebuild its screen (Nuvio's search box: up to ~4 s). Only after that,
@@ -795,12 +820,23 @@ public class HijackService extends AccessibilityService {
                 lastSig[0] = sig;
                 boolean mayAct = settled
                         && (lastMenuClick[0] == 0L || sinceMenu >= TYPE_ITEM_WAIT_MS);
-                int r = trySearchByTyping(app, query, mayAct && !clickedLabel[0], mayAct);
+                boolean allowLabel = !strict[0] || route[0].contains("label");
+                boolean allowMenu = !strict[0] || (route[0].contains("menu:") && !menuDone[0]);
+                int r = trySearchByTyping(app, query, mayAct && !clickedLabel[0] && allowLabel,
+                        mayAct && allowMenu);
                 if (r == TYPE_DONE) {
                     typeSearchToken++;
                     RingLog.i(TAG, "Voice search typed into " + app + " after " + sinceStart + "ms");
-                    // The menu item that led here is this app's route to its search.
-                    if (lastClickedMenuIndex >= 0) prefs.setVoiceRoute(app, lastClickedMenuIndex);
+                    // How search was reached is remembered for next time.
+                    String kind = steps.length() == 0 ? "box" : steps.toString();
+                    // A search box that was simply already on screen says nothing about the
+                    // way in from the app's home, so it never replaces a known route.
+                    if (!"box".equals(kind) || route[0] == null && prefs.getVoiceRouteKind(app) == null) {
+                        prefs.setVoiceRouteKind(app, kind);
+                        RingLog.i(TAG, "Voice search: route for " + app + " saved as '" + kind + "'");
+                    } else {
+                        RingLog.i(TAG, "Voice search: box was already open; route for " + app + " kept");
+                    }
                     // Let the results start drawing before the panel lifts.
                     mainHandler.postDelayed(new Runnable() {
                         @Override public void run() { hideVoicePanel(); }
@@ -809,16 +845,42 @@ public class HijackService extends AccessibilityService {
                 }
                 if (r == TYPE_CLICKED_SEARCH) {
                     clickedLabel[0] = true;
+                    acted[0] = true;
                     lastMenuClick[0] = now;
+                    steps.append(steps.length() == 0 ? "" : "+").append("label");
                 } else if (r == TYPE_REVEALED_MENU) {
+                    acted[0] = true;
+                    menuDone[0] = true;
                     lastMenuClick[0] = now;
-                } else if (r == TYPE_GAVE_UP || sinceStart > TYPE_SEARCH_MAX_MS) {
+                    steps.append(steps.length() == 0 ? "" : "+").append("menu:").append(lastClickedMenuIndex);
+                }
+                if (strict[0] && ((r == TYPE_GAVE_UP && sinceStart >= TYPE_MIN_GIVE_UP_MS)
+                        || (acted[0] && sinceMenu >= TYPE_STRICT_WAIT_MS && lastMenuClick[0] != 0L
+                                && r != TYPE_CLICKED_SEARCH && r != TYPE_REVEALED_MENU)
+                        || (!acted[0] && sinceStart >= TYPE_MIN_GIVE_UP_MS))) {
+                    // The remembered route led nowhere: forget it and try everything.
+                    RingLog.i(TAG, "Voice search: remembered route '" + route[0] + "' failed for "
+                            + app + " (r=" + r + " acted=" + acted[0] + " sinceStart=" + sinceStart
+                            + " sinceMenu=" + sinceMenu + "); trying every way again");
+                    prefs.clearVoiceRoute(app);
+                    strict[0] = false;
+                    learnedRoute = -1;
+                    sideMenuNext = 0;
+                    lastClickedMenuIndex = -1;
+                    clickedLabel[0] = false;
+                    menuDone[0] = false;
+                    steps.setLength(0);
+                    acted[0] = false;
+                    lastMenuClick[0] = 0L;
+                    startAt[0] = now;
+                    lastSig[0] = -1;
+                } else if (!strict[0] && ((r == TYPE_GAVE_UP && sinceStart >= TYPE_MIN_GIVE_UP_MS)
+                        || sinceStart > TYPE_SEARCH_MAX_MS)) {
                     typeSearchToken++;
                     hideVoicePanel();
+                    prefs.clearVoiceRoute(app);
                     RingLog.i(TAG, "Voice search: no search box found in " + app);
-                    android.widget.Toast.makeText(HijackService.this,
-                            getString(R.string.voice_no_search_box, appName(app)),
-                            android.widget.Toast.LENGTH_LONG).show();
+                    showSearchFailedCard(app);
                     return;
                 }
                 mainHandler.postDelayed(this, TYPE_POLL_MS);
@@ -833,6 +895,10 @@ public class HijackService extends AccessibilityService {
     private static final long TYPE_SETTLE_MS = 3_500L;
     private static final long TYPE_ITEM_WAIT_MS = 2_500L;
     private static final long TYPE_SEARCH_MAX_MS = 16_000L;
+    /** After a remembered click, how long its result may take before the route counts as failed. */
+    private static final long TYPE_STRICT_WAIT_MS = 5_000L;
+    /** "No side menu" is only an answer once the app has had this long to draw one. */
+    private static final long TYPE_MIN_GIVE_UP_MS = 7_000L;
 
     private static final int TYPE_NOT_YET = 0;
     private static final int TYPE_DONE = 1;
@@ -1090,7 +1156,15 @@ public class HijackService extends AccessibilityService {
         if (pkg.startsWith("com.amazon.") && !isLeanbackLaunchable(pkg)) return;
         lastUserApp = pkg;
         lastUserAppAt = System.currentTimeMillis();
+        // The user's launcher is a home screen, not "an app you were in".
+        homeSinceApp = pkg.equals(prefs.getTargetPackage());
     }
+
+    /**
+     * True once a home screen (the launcher, or Amazon's) has come up after the last
+     * ordinary app. A voice search then has no app to go to: Alexa's results stay.
+     */
+    private volatile boolean homeSinceApp = false;
 
     /**
      * Alexa answered a voice request with its own search page. If the user was in an
@@ -1106,6 +1180,10 @@ public class HijackService extends AccessibilityService {
         if (!prefs.isVoiceSearchToApp() || mainHandler == null) return;
         if (voiceChoicePending || System.currentTimeMillis() - voiceFlowAt < VOICE_FLOW_GUARD_MS) {
             return; // the same request, already being handled (or just decided)
+        }
+        if (homeSinceApp) {
+            RingLog.i(TAG, "Alexa search page up from a home screen: Alexa's results stay");
+            return;
         }
         if (lastUserApp == null) {
             // Nothing tracked since the service started: fall back to the foreground
@@ -1211,26 +1289,100 @@ public class HijackService extends AccessibilityService {
     }
 
     /** Leaves {@code app} for the launcher (or Amazon home) and stops it in the background. */
+    private static final int BACK_OUT_MAX = 14;
+    private static final long BACK_OUT_GAP_MS = 320L;
+    /**
+     * Hold Back: close the app the way the user would, by pressing Back until it is no
+     * longer in front. A cover hides the screens flying past; if the app will not leave,
+     * fall back to going to the launcher. Ending the app's process is not possible for
+     * this app (D30, D33), so an app that keeps its state in a live process (TizenTube and
+     * other YouTube TV apps) resumes where it was when opened again.
+     */
     private void exitApp(final String app) {
+        showVpnCover(app, getString(R.string.back_out_title, appName(app)));
+        if (prefs.isBackHoldForceStop() && LocalAdb.usable(this)
+                && AdbActions.whyNotStoppable(this, app) == null) {
+            forceStopApp(app);
+            return;
+        }
+        RingLog.i(TAG, "Hold Back: backing out of " + app);
+        backOutStep(app, 0);
+    }
+
+    /**
+     * Hold Back with Fast actions (D42): straight to the launcher, then force-stop the app, so it
+     * starts fresh next time. If the force-stop fails, the app is still left (it stays in the
+     * background, as with backing out).
+     */
+    private void forceStopApp(final String app) {
+        RingLog.i(TAG, "Hold Back: closing " + app + " with a force-stop");
         String target = prefs.getTargetPackage();
         boolean launched = target != null && !target.isEmpty() && prefs.isHijackEnabled()
-                && launchTarget(target, "Hold Back: leaving " + app, false);
+                && !target.equals(app) && launchTarget(target, "Hold Back: leaving " + app, false);
         if (!launched) {
             ownHomeDispatchAt = System.currentTimeMillis();
             performGlobalAction(GLOBAL_ACTION_HOME);
         }
-        RingLog.i(TAG, "Hold Back: closed " + app);
-        mainHandler.postDelayed(new Runnable() {
-            @Override public void run() {
-                if (app.equals(currentForegroundPkg)) return;
-                try {
-                    ((android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE))
-                            .killBackgroundProcesses(app);
-                } catch (Exception ignored) {
-                    // best effort
+        LocalAdb.submit(this, "force-stop " + app, new LocalAdb.Job() {
+            @Override public void run(LocalAdb.Session s) throws Exception {
+                AdbActions.forceStop(HijackService.this, s, app);
+            }
+        }, new LocalAdb.Callback() {
+            @Override public void done(boolean ok) { hideVpnCover(); }
+        });
+    }
+
+    /** Quick menu "Free up memory" (D42): force-stops the running apps that may be stopped. */
+    private void freeUpMemory(String why) {
+        final String keep = currentForegroundPackage();
+        RingLog.i(TAG, why + ": free up memory (keeping " + keep + ")");
+        final java.util.List<String> stopped = new java.util.ArrayList<String>();
+        LocalAdb.submit(this, "free up memory", new LocalAdb.Job() {
+            @Override public void run(LocalAdb.Session s) throws Exception {
+                stopped.addAll(AdbActions.freeMemory(HijackService.this, s, keep));
+            }
+        }, new LocalAdb.Callback() {
+            @Override public void done(boolean ok) {
+                String msg = !ok ? getString(R.string.free_failed)
+                        : stopped.isEmpty() ? getString(R.string.free_none)
+                        : getResources().getQuantityString(R.plurals.free_done, stopped.size(), stopped.size());
+                RingLog.i(TAG, "Free up memory: " + (ok ? "stopped " + stopped : "failed"));
+                android.widget.Toast.makeText(HijackService.this, msg, android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void backOutStep(final String app, final int n) {
+        String fg = currentForegroundPackage();
+        boolean still = app.equals(fg);
+        if (!still || n >= BACK_OUT_MAX) {
+            RingLog.i(TAG, "Hold Back: " + (still ? "app would not leave after " + n + " Backs"
+                    : "left " + app + " after " + n + " Backs"));
+            String target0 = prefs.getTargetPackage();
+            if (!still && fg != null && target0 != null && !target0.isEmpty() && prefs.isHijackEnabled()
+                    && !fg.equals(target0)) {
+                // Backing out of the app's first screen lands on Amazon home: go on to the launcher.
+                launchTarget(target0, "Hold Back: on to the launcher after " + app, false);
+            }
+            if (still) {
+                String target = prefs.getTargetPackage();
+                boolean launched = target != null && !target.isEmpty() && prefs.isHijackEnabled()
+                        && launchTarget(target, "Hold Back: leaving " + app, false);
+                if (!launched) {
+                    ownHomeDispatchAt = System.currentTimeMillis();
+                    performGlobalAction(GLOBAL_ACTION_HOME);
                 }
             }
-        }, 1_500L);
+            mainHandler.postDelayed(new Runnable() {
+                @Override public void run() { hideVpnCover(); }
+            }, 700L);
+            return;
+        }
+        selfBackUntil = System.currentTimeMillis() + 600L;
+        performGlobalAction(GLOBAL_ACTION_BACK);
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() { backOutStep(app, n + 1); }
+        }, BACK_OUT_GAP_MS);
     }
 
     /** How long the decision panel waits before searching in the app. */
@@ -1363,7 +1515,25 @@ public class HijackService extends AccessibilityService {
         if (voicePanelBar != null) voicePanelBar.setIndeterminate(true);
     }
 
+    /** App whose first real content lifts the voice panel (link hand-off), or null. */
+    private volatile String voiceLiftPkg = null;
+    private static final long VOICE_LIFT_MAX_MS = 6_000L;
+    /** The app reports content at start-up, well before it shows results: keep covering a while. */
+    private static final long VOICE_LIFT_TAIL_MS = 2_000L;
+
+    /** Lifts the panel when {@code pkg} is the awaited app, or at the cap (pkg null). */
+    private void liftVoicePanelFor(String pkg) {
+        String waiting = voiceLiftPkg;
+        if (waiting == null || (pkg != null && !pkg.equals(waiting))) return;
+        voiceLiftPkg = null;
+        if (mainHandler == null) { hideVoicePanel(); return; }
+        mainHandler.postDelayed(new Runnable() {
+            @Override public void run() { hideVoicePanel(); }
+        }, pkg == null ? 0L : VOICE_LIFT_TAIL_MS);
+    }
+
     private void hideVoicePanel() {
+        voiceLiftPkg = null;
         voiceChoicePending = false;
         voiceWorking = false;
         if (voicePanel != null) {
@@ -1413,14 +1583,23 @@ public class HijackService extends AccessibilityService {
             typeSearchInto(app, query); // the waiting panel stays up meanwhile
             return;
         }
-        // A link opens in well under a second: a plain cover until the app paints.
-        showButtonCover(app);
-        hideVoicePanel();
+        // One screen all the way: the voice panel turns into "Opening search" and stays up
+        // until the app reports real content, instead of giving way to a second cover.
+        boolean keepPanel = voicePanel != null;
+        if (keepPanel) {
+            showWorking(app);
+            voiceLiftPkg = app;
+            mainHandler.postDelayed(new Runnable() {
+                @Override public void run() { liftVoicePanelFor(null); }
+            }, VOICE_LIFT_MAX_MS);
+        } else {
+            showButtonCover(app);
+        }
         try {
             startActivity(search);
             RingLog.i(TAG, "Voice search sent to " + app);
         } catch (Exception e) {
-            hideButtonCover();
+            if (keepPanel) liftVoicePanelFor(null); else hideButtonCover();
             Log.w(TAG, "Voice search to " + app + " failed: " + e);
         }
     }
@@ -1874,6 +2053,7 @@ public class HijackService extends AccessibilityService {
         if (AMAZON_LAUNCHER.equals(pkgStr) && ALEXA_SEARCH_CLS.equals(clsStr)) {
             handleAlexaSearchPage();
         }
+        if (voiceLiftPkg != null && isRealContentClass(clsStr)) liftVoicePanelFor(pkgStr);
         if (buttonCoverFor != null && pkgStr != null && pkgStr.equals(buttonCoverFor)
                 && isRealContentClass(clsStr)) {
             hideButtonCoverSoon();
@@ -1881,6 +2061,7 @@ public class HijackService extends AccessibilityService {
 
         boolean isAmazonHome = isAmazonHomeWindow(pkgStr, clsStr);
         onAmazonHomeActivity = isAmazonHome;
+        if (isAmazonHome) homeSinceApp = true;
         // Deliberately the regular launcher only: this gates the Home-tab bounds capture
         // for the Back/OK-on-Home-tab gesture, and the kids launcher has no such tab.
         boolean inAmazonLauncher = AMAZON_LAUNCHER.equals(pkgStr);
@@ -2823,6 +3004,14 @@ public class HijackService extends AccessibilityService {
             trackKeyState(keyCode);
         }
         if (handleVoicePanelKey(event)) return true;
+        if (vpnCover != null) {
+            if (System.currentTimeMillis() < selfBackUntil) return false; // our own Back
+            // While the VPN is switched in the background, keys must not reach the VPN
+            // app; Back stops it.
+            if (isDown && keyCode == KeyEvent.KEYCODE_BACK && vpnDriving) cancelVpn();
+            return true;
+        }
+        if (handleQuickMenuKey(event)) return true;
         if (prefs.isVerboseLogging()) {
             // Raw key trace incl. scan code: tells which remote buttons reach the
             // accessibility filter at all on a given Fire OS build.
@@ -3828,6 +4017,11 @@ public class HijackService extends AccessibilityService {
             @Override
             public void run() {
                 pendingMenuLongPress = null;
+                if (prefs.isQuickMenu() && quickMenu == null && !isQuickPanelUp()) {
+                    menuLongPressFired = true;
+                    showQuickMenu();
+                    return;
+                }
                 if (!prefs.isMenuLongPressLaunch()) return;
                 String fg = currentForegroundPackage();
                 if (fg == null) fg = currentForegroundPkg;
@@ -3840,7 +4034,7 @@ public class HijackService extends AccessibilityService {
                 }
             }
         };
-        mainHandler.postDelayed(pendingMenuLongPress, MENU_LONG_PRESS_THRESHOLD_MS);
+        mainHandler.postDelayed(pendingMenuLongPress, android.view.ViewConfiguration.getLongPressTimeout());
     }
 
     /** Cancels a pending Menu long-press fire if the key was released early. */
@@ -3855,6 +4049,8 @@ public class HijackService extends AccessibilityService {
     @Override
     public boolean onUnbind(android.content.Intent intent) {
         cancelMenuLongPress();
+        hideQuickMenu();
+        hideVpnCover();
         // Flush every pending main-handler post (the wake-from-standby
         // runnable in particular) so nothing fires after the service
         // disconnects.
@@ -4141,6 +4337,528 @@ public class HijackService extends AccessibilityService {
         }
     }
 
+    // ---- VPN toggle -------------------------------------------------------------------
+    // Works with any VPN app (see VpnHelper): open it, click its connect/disconnect
+    // button, and confirm by the network's VPN transport. A status chip shows the result.
+
+    private static final long VPN_DRIVE_MS = 30_000L;
+    private static final long VPN_POLL_MS = 600L;
+    private static final long VPN_CLICK_GAP_MS = 6_000L;
+    private boolean vpnDriving, vpnWantConnect;
+    private long vpnDriveEnd, vpnLastClick;
+    private String vpnDrivePkg;
+
+    private final Runnable vpnPoll = new Runnable() {
+        @Override public void run() {
+            if (!vpnDriving) return;
+            if (VpnHelper.isConnected(HijackService.this) == vpnWantConnect) {
+                finishVpn(true);
+            } else if (System.currentTimeMillis() > vpnDriveEnd) {
+                finishVpn(false);
+            } else {
+                vpnStep();
+                mainHandler.postDelayed(this, VPN_POLL_MS);
+            }
+        }
+    };
+
+    /** Connects the VPN if it is off, disconnects it if it is on. */
+    void toggleVpn(String why) {
+        if (vpnDriving) return;
+        String pkg = VpnHelper.resolveApp(this, prefs);
+        Intent launch = pkg == null ? null : VpnHelper.launchIntent(getPackageManager(), pkg);
+        if (launch == null) {
+            RingLog.i(TAG, "VPN toggle: no VPN app chosen or installed");
+            return;
+        }
+        vpnWantConnect = !VpnHelper.isConnected(this);
+        vpnDrivePkg = pkg;
+        vpnLastClick = 0L;
+        vpnDriveEnd = System.currentTimeMillis() + VPN_DRIVE_MS;
+        vpnDriving = true;
+        RingLog.i(TAG, "VPN toggle (" + why + "): " + (vpnWantConnect ? "connect " : "disconnect ") + pkg);
+        showVpnCover(pkg, getString(vpnWantConnect ? R.string.vpn_chip_connecting
+                : R.string.vpn_chip_disconnecting));
+        try {
+            startActivity(launch);
+        } catch (Exception e) {
+            RingLog.i(TAG, "VPN app would not open: " + e);
+            vpnDriving = false;
+            hideVpnCover();
+            return;
+        }
+        mainHandler.postDelayed(vpnPoll, 1_200L);
+    }
+
+    private void finishVpn(boolean ok) {
+        vpnDriving = false;
+        mainHandler.removeCallbacks(vpnPoll);
+        boolean up = VpnHelper.isConnected(this);
+        RingLog.i(TAG, "VPN toggle " + (ok ? "done" : "gave up") + ", connected=" + up);
+        if (ok) {
+            setVpnCover(getString(up ? R.string.vpn_chip_on : R.string.vpn_chip_off), false);
+            // Back out of the VPN app, to wherever the user was, then drop the cover.
+            mainHandler.postDelayed(new Runnable() {
+                @Override public void run() { performGlobalAction(GLOBAL_ACTION_BACK); }
+            }, 700L);
+            mainHandler.postDelayed(new Runnable() {
+                @Override public void run() { hideVpnCover(); }
+            }, 1_600L);
+        } else {
+            setVpnCover(getString(R.string.vpn_chip_failed), false);
+            mainHandler.postDelayed(new Runnable() {
+                @Override public void run() { hideVpnCover(); }
+            }, 2_500L);
+        }
+    }
+
+    /** Back during the toggle: stop, leave the VPN app. */
+    private void cancelVpn() {
+        vpnDriving = false;
+        mainHandler.removeCallbacks(vpnPoll);
+        hideVpnCover();
+        performGlobalAction(GLOBAL_ACTION_BACK);
+        RingLog.i(TAG, "VPN toggle cancelled by Back");
+    }
+
+    // ---- Cover shown while the VPN app is driven in the background -------------------
+
+    private android.view.View vpnCover;
+    private android.widget.TextView vpnCoverText;
+    private android.widget.ProgressBar vpnCoverBar;
+
+    private void showVpnCover(String app, String text) {
+        if (windowManager == null) return;
+        hideVpnCover();
+        float d = getResources().getDisplayMetrics().density;
+        android.widget.LinearLayout col = new android.widget.LinearLayout(this);
+        col.setOrientation(android.widget.LinearLayout.VERTICAL);
+        col.setGravity(Gravity.CENTER);
+        col.setBackgroundColor(0xF20B1220);
+        android.widget.ImageView icon = new android.widget.ImageView(this);
+        try {
+            icon.setImageDrawable(getPackageManager().getApplicationIcon(app));
+        } catch (Exception ignored) { /* icon optional */ }
+        col.addView(icon, new android.widget.LinearLayout.LayoutParams((int) (96 * d), (int) (96 * d)));
+        vpnCoverText = new android.widget.TextView(this);
+        vpnCoverText.setText(text);
+        vpnCoverText.setTextColor(0xFFFFFFFF);
+        vpnCoverText.setTextSize(28);
+        vpnCoverText.setGravity(Gravity.CENTER);
+        vpnCoverText.setPadding(0, (int) (24 * d), 0, (int) (16 * d));
+        col.addView(vpnCoverText);
+        vpnCoverBar = new android.widget.ProgressBar(this);
+        vpnCoverBar.setIndeterminate(true);
+        vpnCoverBar.setIndeterminateTintList(android.content.res.ColorStateList.valueOf(0xFF2DD4BF));
+        col.addView(vpnCoverBar, new android.widget.LinearLayout.LayoutParams((int) (48 * d), (int) (48 * d)));
+        android.widget.TextView hint = new android.widget.TextView(this);
+        hint.setText(R.string.vpn_cover_hint);
+        hint.setTextColor(0xFF94A3B8);
+        hint.setTextSize(18);
+        hint.setGravity(Gravity.CENTER);
+        hint.setPadding(0, (int) (24 * d), 0, 0);
+        col.addView(hint);
+        try {
+            windowManager.addView(col, maskLayoutParams());
+            vpnCover = col;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to show the VPN cover", e);
+        }
+    }
+
+    private void setVpnCover(String text, boolean busy) {
+        if (vpnCover == null) return;
+        vpnCoverText.setText(text);
+        vpnCoverBar.setVisibility(busy ? android.view.View.VISIBLE : android.view.View.GONE);
+    }
+
+    private void hideVpnCover() {
+        if (vpnCover != null) {
+            try {
+                windowManager.removeView(vpnCover);
+            } catch (Exception ignored) {
+                // already gone
+            }
+            vpnCover = null;
+        }
+    }
+
+    /** One look at the screen: take the system consent dialog or the VPN app's button. */
+    private void vpnStep() {
+        AccessibilityNodeInfo root = getRootInActiveWindow();
+        if (root == null) return;
+        try {
+            CharSequence pkg = root.getPackageName();
+            if (pkg == null) return;
+            long now = System.currentTimeMillis();
+            if ("com.android.vpndialogs".contentEquals(pkg)) {
+                clickVpnLabel(root, VpnHelper.CONSENT_LABELS, true);
+            } else if (vpnDrivePkg.contentEquals(pkg) && now - vpnLastClick > VPN_CLICK_GAP_MS) {
+                if (clickVpnLabel(root, vpnWantConnect ? VpnHelper.CONNECT_LABELS
+                        : VpnHelper.DISCONNECT_LABELS, vpnWantConnect)) {
+                    vpnLastClick = now;
+                }
+            }
+        } finally {
+            root.recycle();
+        }
+    }
+
+    /** Clicks the best-matching button (earliest label) in the tree; false if none. */
+    private boolean clickVpnLabel(AccessibilityNodeInfo root, String[] labels, boolean wantConnect) {
+        AccessibilityNodeInfo[] best = new AccessibilityNodeInfo[1];
+        int[] bestRank = {Integer.MAX_VALUE};
+        findVpnButton(root, labels, wantConnect, best, bestRank, 0);
+        if (best[0] == null) return false;
+        AccessibilityNodeInfo n = best[0];
+        boolean clicked = false;
+        for (int up = 0; n != null && up < 4 && !clicked; up++) {
+            if (n.isClickable()) clicked = n.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            if (!clicked) n = n.getParent();
+        }
+        if (!clicked) {
+            // TV apps often show the label as a heading and put the focus on the action
+            // itself (Proton TV: "Quick connect" heads the row, the focused tile connects).
+            AccessibilityNodeInfo f = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+            if (f != null && f.isClickable()) clicked = f.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+        }
+        RingLog.i(TAG, "VPN button '" + labels[bestRank[0]] + "' clicked=" + clicked);
+        return clicked;
+    }
+
+    private void findVpnButton(AccessibilityNodeInfo node, String[] labels, boolean wantConnect,
+            AccessibilityNodeInfo[] best, int[] bestRank, int depth) {
+        if (node == null || depth > 30) return;
+        CharSequence[] texts = {node.getText(), node.getContentDescription()};
+        for (CharSequence t : texts) {
+            for (int i = 0; i < labels.length && i < bestRank[0]; i++) {
+                if (VpnHelper.matches(t, new String[]{labels[i]}, wantConnect)) {
+                    best[0] = node;
+                    bestRank[0] = i;
+                    break;
+                }
+            }
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            findVpnButton(node.getChild(i), labels, wantConnect, best, bestRank, depth + 1);
+        }
+    }
+
+    /** True while Amazon's long-press panel is on screen. */
+    private boolean isQuickPanelUp() {
+        java.util.List<android.view.accessibility.AccessibilityWindowInfo> windows = getWindows();
+        if (windows == null) return false;
+        for (android.view.accessibility.AccessibilityWindowInfo win : windows) {
+            if (win == null) continue;
+            AccessibilityNodeInfo root = win.getRoot();
+            if (root == null) continue;
+            try {
+                if (QUICKSETTINGS_PKG.contentEquals(root.getPackageName())) return true;
+            } finally {
+                root.recycle();
+            }
+        }
+        return false;
+    }
+
+    // ---- Quick menu (hold Menu) -------------------------------------------------------
+    // Our own panel, drawn as a non-focusable overlay; the key filter drives it, the same
+    // way as the voice panel. Items are a list so more can be added later.
+
+    private static final class QmItem {
+        final String label;
+        final String status;
+        final Runnable action;
+        QmItem(String label, String status, Runnable action) {
+            this.label = label;
+            this.status = status;
+            this.action = action;
+        }
+    }
+
+    private android.view.View quickMenu;
+    private final java.util.ArrayList<QmItem> qmItems = new java.util.ArrayList<QmItem>();
+    private final java.util.ArrayList<android.view.View> qmRows = new java.util.ArrayList<android.view.View>();
+    private int qmIndex;
+
+    // Look copied from Amazon's own long-press panel (measured on a 1080p capture): an
+    // opaque #2A2A2A card docked top-right with a 40 px margin, a clock line, rows with
+    // an icon and a label, and a light #F0F0F0 pill on the selected row. It slides in
+    // from the right while fading in.
+    private static final int QM_BG = 0xFF2A2A2A;
+    private static final int QM_PILL = 0xFFF0F0F0;
+    private static final int QM_TEXT = 0xFFC2C2C2;
+    private static final int QM_TEXT_ON_PILL = 0xFF2A2A2A;
+    private final java.util.ArrayList<android.widget.TextView> qmLabels = new java.util.ArrayList<android.widget.TextView>();
+    private final java.util.ArrayList<android.widget.TextView> qmStates = new java.util.ArrayList<android.widget.TextView>();
+    private final java.util.ArrayList<android.widget.ImageView> qmIcons = new java.util.ArrayList<android.widget.ImageView>();
+    private android.view.View qmCard;
+
+    private void showQuickMenu() {
+        final long t0 = android.os.SystemClock.uptimeMillis();
+        if (windowManager == null || quickMenu != null || vpnDriving || voicePanel != null
+                || vpnCover != null) return;
+        qmItems.clear();
+        qmRows.clear();
+        qmLabels.clear();
+        qmStates.clear();
+        qmIcons.clear();
+        final String vpnApp = VpnHelper.resolveApp(this, prefs);
+        final java.util.ArrayList<Integer> icons = new java.util.ArrayList<Integer>();
+        if (vpnApp != null && prefs.isQmItem(Prefs.QM_VPN)) {
+            boolean up = VpnHelper.isConnected(this);
+            qmItems.add(new QmItem(getString(R.string.qm_vpn),
+                    getString(up ? R.string.vpn_state_on : R.string.vpn_state_off),
+                    new Runnable() {
+                        @Override public void run() { toggleVpn("Quick menu"); }
+                    }));
+            icons.add(R.drawable.ic_qm_vpn);
+        }
+        if (prefs.isQmItem(Prefs.QM_AMAZON)) {
+            qmItems.add(new QmItem(getString(R.string.qm_amazon), "", new Runnable() {
+                @Override public void run() { redirectToAmazonHome("Quick menu"); }
+            }));
+            icons.add(R.drawable.ic_qm_home);
+        }
+        if (prefs.isQmItem(Prefs.QM_FREE) && LocalAdb.usable(this)) {
+            qmItems.add(new QmItem(getString(R.string.qm_free), "", new Runnable() {
+                @Override public void run() { freeUpMemory("Quick menu"); }
+            }));
+            icons.add(R.drawable.ic_qm_free);
+        }
+        if (prefs.isQmItem(Prefs.QM_SETTINGS) || qmItems.isEmpty()) {
+            qmItems.add(new QmItem(getString(R.string.qm_settings), "", new Runnable() {
+                @Override public void run() { openSelf(); }
+            }));
+            icons.add(R.drawable.ic_qm_settings);
+        }
+
+        showMenuCard(null, null, icons, t0);
+    }
+
+    /** What to show when no search box can be found in an app. */
+    private void showSearchFailedCard(final String app) {
+        mainHandler.post(new Runnable() {
+            @Override public void run() {
+                hideQuickMenu();
+                qmItems.clear();
+                qmRows.clear();
+                qmLabels.clear();
+                qmStates.clear();
+                qmIcons.clear();
+                final String name = appName(app);
+                java.util.ArrayList<Integer> icons = new java.util.ArrayList<Integer>();
+                qmItems.add(new QmItem(getString(R.string.fail_use_alexa, name), "", new Runnable() {
+                    @Override public void run() {
+                        prefs.setAlexaResultsApp(app, true);
+                        android.widget.Toast.makeText(HijackService.this,
+                                getString(R.string.fail_use_alexa_done, name),
+                                android.widget.Toast.LENGTH_LONG).show();
+                    }
+                }));
+                icons.add(R.drawable.ic_qm_alexa);
+                qmItems.add(new QmItem(getString(R.string.fail_open_settings), "", new Runnable() {
+                    @Override public void run() { openSelf(); }
+                }));
+                icons.add(R.drawable.ic_qm_settings);
+                qmItems.add(new QmItem(getString(R.string.fail_dismiss), "", new Runnable() {
+                    @Override public void run() { /* just close */ }
+                }));
+                icons.add(R.drawable.ic_qm_close);
+                showMenuCard(getString(R.string.fail_title, name), getString(R.string.fail_message),
+                        icons, android.os.SystemClock.uptimeMillis());
+                final android.view.View shown = quickMenu;
+                if (shown != null) {
+                    mainHandler.postDelayed(new Runnable() {
+                        @Override public void run() { if (quickMenu == shown) hideQuickMenu(); }
+                    }, 20_000L);
+                }
+            }
+        });
+    }
+
+    /**
+     * Draws the card for the items already in qmItems. With no title it is the quick menu
+     * (clock line on top); with one, a title and message sit above the rows.
+     */
+    private void showMenuCard(String cardTitle, String cardMessage,
+            java.util.ArrayList<Integer> icons, long t0) {
+        // Sizes follow the screen height (Amazon's panel is laid out for 1080 px).
+        final android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+        final float u = dm.heightPixels / 1080f;
+        android.widget.LinearLayout card = new android.widget.LinearLayout(this);
+        card.setOrientation(android.widget.LinearLayout.VERTICAL);
+        card.setPadding((int) (40 * u), (int) (30 * u), (int) (40 * u), (int) (30 * u));
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(QM_BG);
+        bg.setCornerRadius(44 * u);
+        card.setBackground(bg);
+
+        if (cardTitle == null) {
+            android.widget.TextClock clock = new android.widget.TextClock(this);
+            clock.setFormat12Hour("h:mm a   EEE, MMM d");
+            clock.setFormat24Hour("HH:mm   EEE, MMM d");
+            clock.setTextColor(0xFF8A8A8A);
+            clock.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 24 * u);
+            clock.setPadding((int) (8 * u), 0, 0, (int) (22 * u));
+            card.addView(clock);
+        } else {
+            android.widget.TextView t = new android.widget.TextView(this);
+            t.setText(cardTitle);
+            t.setTextColor(0xFFF0F0F0);
+            t.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 32 * u);
+            t.setPadding((int) (8 * u), 0, (int) (8 * u), (int) (10 * u));
+            card.addView(t);
+            android.widget.TextView m = new android.widget.TextView(this);
+            m.setText(cardMessage);
+            m.setTextColor(0xFF9A9A9A);
+            m.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 24 * u);
+            m.setPadding((int) (8 * u), 0, (int) (8 * u), (int) (26 * u));
+            card.addView(m);
+        }
+
+        for (int i = 0; i < qmItems.size(); i++) {
+            QmItem it = qmItems.get(i);
+            android.widget.LinearLayout row = new android.widget.LinearLayout(this);
+            row.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding((int) (32 * u), 0, (int) (32 * u), 0);
+            android.widget.ImageView ic = new android.widget.ImageView(this);
+            ic.setImageResource(icons.get(i));
+            row.addView(ic, new android.widget.LinearLayout.LayoutParams((int) (34 * u), (int) (34 * u)));
+            android.widget.TextView l = new android.widget.TextView(this);
+            l.setText(it.label);
+            l.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 30 * u);
+            l.setPadding((int) (24 * u), 0, 0, 0);
+            row.addView(l, new android.widget.LinearLayout.LayoutParams(0,
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            android.widget.TextView st = new android.widget.TextView(this);
+            st.setText(it.status);
+            st.setTextSize(android.util.TypedValue.COMPLEX_UNIT_PX, 26 * u);
+            row.addView(st);
+            android.widget.LinearLayout.LayoutParams rlp = new android.widget.LinearLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT, (int) (94 * u));
+            rlp.bottomMargin = (int) (30 * u);
+            card.addView(row, rlp);
+            qmRows.add(row);
+            qmLabels.add(l);
+            qmStates.add(st);
+            qmIcons.add(ic);
+        }
+        qmCard = card;
+
+        // A window just the size of the card, docked top-right, so the screen around it
+        // stays untouched like Amazon's.
+        android.widget.FrameLayout root = new android.widget.FrameLayout(this);
+        int w = (int) (574 * u);
+        root.addView(card, new android.widget.FrameLayout.LayoutParams(w,
+                android.view.ViewGroup.LayoutParams.WRAP_CONTENT));
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(w,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        lp.gravity = Gravity.TOP | Gravity.END;
+        lp.x = (int) (40 * u);
+        lp.y = (int) (40 * u);
+        try {
+            windowManager.addView(root, lp);
+            quickMenu = root;
+            qmIndex = 0;
+            paintQuickMenu(u);
+            RingLog.i(TAG, "Quick menu built in " + (android.os.SystemClock.uptimeMillis() - t0) + " ms");
+            card.setAlpha(0f);
+            card.setTranslationX(120 * u);
+            card.animate().alpha(1f).translationX(0f).setDuration(240L)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator(1.6f)).start();
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to show the quick menu", e);
+        }
+    }
+
+    private void paintQuickMenu(float u) {
+        for (int i = 0; i < qmRows.size(); i++) {
+            boolean sel = i == qmIndex;
+            android.graphics.drawable.GradientDrawable g = new android.graphics.drawable.GradientDrawable();
+            g.setCornerRadius(28 * u);
+            g.setColor(sel ? QM_PILL : 0x00000000);
+            qmRows.get(i).setBackground(g);
+            int c = sel ? QM_TEXT_ON_PILL : QM_TEXT;
+            qmLabels.get(i).setTextColor(c);
+            qmIcons.get(i).setColorFilter(c);
+            boolean on = getString(R.string.vpn_state_on).equals(qmItems.get(i).status);
+            qmStates.get(i).setTextColor(on ? (sel ? 0xFF15803D : 0xFF4ADE80) : (sel ? 0xFF6B6B6B : 0xFF8A8A8A));
+        }
+    }
+
+    private void hideQuickMenu() {
+        final android.view.View v = quickMenu;
+        quickMenu = null;
+        if (v == null) return;
+        // Slide out like it came in, then drop the window.
+        final float u = getResources().getDisplayMetrics().heightPixels / 1080f;
+        qmCard.animate().alpha(0f).translationX(80 * u).setDuration(150L)
+                .withEndAction(new Runnable() {
+                    @Override public void run() {
+                        try {
+                            windowManager.removeView(v);
+                        } catch (Exception ignored) {
+                            // already gone
+                        }
+                    }
+                }).start();
+    }
+
+    /** Keys while the menu is up; everything is held back from the app underneath. */
+    private boolean handleQuickMenuKey(KeyEvent event) {
+        if (quickMenu == null) return false;
+        int code = event.getKeyCode();
+        // The Menu press that opened it is still held; the Menu swallow in onKeyEvent
+        // takes its repeats and release.
+        if (code == KeyEvent.KEYCODE_MENU && menuLongPressFired) return false;
+        if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
+        float d = getResources().getDisplayMetrics().heightPixels / 1080f;
+        if (code == KeyEvent.KEYCODE_DPAD_DOWN) {
+            qmIndex = Math.min(qmIndex + 1, qmItems.size() - 1);
+            paintQuickMenu(d);
+        } else if (code == KeyEvent.KEYCODE_DPAD_UP) {
+            qmIndex = Math.max(qmIndex - 1, 0);
+            paintQuickMenu(d);
+        } else if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) {
+            Runnable go = qmItems.get(qmIndex).action;
+            hideQuickMenu();
+            go.run();
+        } else if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_MENU) {
+            hideQuickMenu();
+        }
+        return true;
+    }
+
+    void testFailCard(String app) {
+        showSearchFailedCard(app);
+    }
+
+    /** Test hook: the same state the toggle sees. */
+    void testVpn(java.io.PrintWriter pw, String arg) {
+        if ("menu".equals(arg)) {
+            showQuickMenu();
+            pw.println("OK menu shown=" + (quickMenu != null));
+            return;
+        }
+        if ("toggle".equals(arg)) {
+            toggleVpn("test");
+            pw.println("OK toggling");
+            return;
+        }
+        pw.println("apps=" + VpnHelper.installedApps(this)
+                + " chosen=" + prefs.getVpnApp()
+                + " resolved=" + VpnHelper.resolveApp(this, prefs)
+                + " connected=" + VpnHelper.isConnected(this)
+                + " panelUp=" + isQuickPanelUp());
+    }
+
     /** Shared overlay LayoutParams for the real mask and the prewarm. */
     private WindowManager.LayoutParams maskLayoutParams() {
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -4404,9 +5122,11 @@ public class HijackService extends AccessibilityService {
 
     /** A few lines of live state for the test script. */
     void testState(java.io.PrintWriter pw) {
+        pw.println("lastUserApp=" + lastUserApp + " homeSinceApp=" + homeSinceApp);
         pw.println("target=" + prefs.getTargetPackage());
         pw.println("hijack=" + prefs.isHijackEnabled() + " doubleTap=" + prefs.isEscapeDoublePress()
-                + " backStays=" + prefs.isBackStaysOnLauncher() + " backHold=" + prefs.isBackHoldExit());
+                + " backStays=" + prefs.isBackStaysOnLauncher() + " backHold=" + prefs.isBackHoldExit()
+                + " backHoldForce=" + prefs.isBackHoldForceStop() + " fast=" + LocalAdb.status(this));
         pw.println("remap=" + prefs.isLaunchKeyEnabled() + " voice=" + prefs.isVoiceSearchToApp()
                 + " bootApp=" + prefs.getBootApp() + " launchOnBoot=" + prefs.getLaunchOnBoot());
         pw.println("precise=" + preciseMode() + " preciseButtons=" + preciseButtons()

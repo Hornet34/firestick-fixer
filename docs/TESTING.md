@@ -28,6 +28,8 @@ Ctrl-C), then prints them. It ends on your launcher.
 | `buttons` | Per mapping: opening the app yourself is left alone; its button opens the mapped app |
 | `voice` | Voice hand-off runs in TizenTube, YouTube and Nuvio (if installed) |
 | `voice_keep_alexa` | Back during the countdown keeps Alexa's results |
+| `fast` | Fast actions answer (read-only command) and refuse the launcher, this app, Amazon home (skipped if not set up) |
+| `hold_back_force` | With Fast actions, holding Back force-stops the test app and opens the launcher |
 | `alexa_list` | An app on "Apps that keep Alexa's results" is not handed the search |
 
 How it reaches what adb can't: remote keys injected with `adb shell input` never pass
